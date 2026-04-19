@@ -1984,10 +1984,26 @@ class ESPNWorker:
             return None
         url = f"{EndpointRegistry.BASE_URL}/{category}/{sport}/summary"
         cache_key = f"{category}_{sport}_summary_{event_id}"
-        # Final games only need to be fetched once
+        def _extract_and_save_pbp(raw: dict):
+            """Extract PBP from raw ESPN summary JSON and persist if not already stored."""
+            if self.db.has_pbp(event_id):
+                return
+            drives = (raw.get('drives') or {}).get('previous', [])
+            if drives:
+                self.db.save_play_by_play(event_id, sport_key, drives)
+            else:
+                flat_plays = raw.get('plays') or raw.get('scoringPlays') or []
+                if flat_plays:
+                    self.db.save_play_by_play(
+                        event_id, sport_key,
+                        [{'plays': flat_plays, 'description': 'Plays'}]
+                    )
+
+        # Final games only need to be fetched once — but still extract PBP from cache if missing
         if self.db.is_game_final(event_id):
             cached = self.db.get_cached_data(cache_key, 86400 * 365)
             if cached:
+                _extract_and_save_pbp(cached)
                 return cached
         try:
             resp = self.session.get(url, params={'event': str(event_id)}, timeout=20)
@@ -1998,17 +2014,7 @@ class ESPNWorker:
             if summary:
                 self.db.save_game_summary(summary)
             # Extract play-by-play (football uses drives; all other sports use flat plays list)
-            if not self.db.has_pbp(event_id):
-                drives = (data.get('drives') or {}).get('previous', [])
-                if drives:
-                    # Football: drives contain nested plays[]
-                    self.db.save_play_by_play(event_id, sport_key, drives)
-                else:
-                    # Basketball, hockey, baseball, soccer: flat plays list
-                    flat_plays = data.get('plays') or data.get('scoringPlays') or []
-                    if flat_plays:
-                        # Wrap as a synthetic single drive so save_play_by_play works unchanged
-                        self.db.save_play_by_play(event_id, sport_key, [{'plays': flat_plays, 'description': 'Plays'}])
+            _extract_and_save_pbp(data)
             return data
         except Exception as e:
             self.last_error = str(e)
@@ -2809,12 +2815,17 @@ def render_game_card(game: Any, db: Any = None, worker: Any = None, category: st
         else:
             render_game_detail(event_id, db, home_abbr_game, away_abbr_game)
 
-    # ── Play-by-Play expander (football drives) ─────────────────
+    # ── Play-by-Play expander ─────────────────────────────────────
     has_pbp_link = bool(links_data.get('pbp'))
-    if not has_pbp_link:
+    is_football   = (category == 'football')
+    # Show PBP section for: football (requires pbp link), or any non-football final/live game
+    show_pbp_section = has_pbp_link or (not is_football and (is_final or is_live))
+    if not show_pbp_section:
         return
 
-    with st.expander("▶ Play-by-Play", expanded=False):
+    pbp_icon = "🏈" if is_football else {"basketball": "🏀", "baseball": "⚾", "hockey": "🏒", "soccer": "⚽"}.get(category, "▶")
+
+    with st.expander(f"{pbp_icon} Play-by-Play", expanded=False):
         already_fetched = db.has_pbp(event_id)
 
         if not already_fetched:
@@ -2828,42 +2839,85 @@ def render_game_card(game: Any, db: Any = None, worker: Any = None, category: st
                     else:
                         st.error("Worker not available.")
             with col_info:
-                st.caption("Pulls full drive-by-drive data from ESPN for this game.")
+                if is_football:
+                    st.caption("Pulls full drive-by-drive data from ESPN for this game.")
+                else:
+                    st.caption("Pulls play-by-play data from ESPN for this game.")
             return
 
-        # ── Drive-by-drive breakdown ───────────────────────────
+        # ── Load stored plays ──────────────────────────────────
         df_all = db.get_play_by_play(event_id)
         if df_all.empty:
             st.info("No play data stored.")
             return
 
-        st.markdown("**Drives**")
-        for drive_num, drive_df in df_all.groupby('drive_num', sort=True):
-            first = drive_df.iloc[0]
-            score_icon = "🏈" if first['drive_is_score'] else ""
-            header = (
-                f"{score_icon} **{first['team_abbr'] or '—'}** · "
-                f"{first['drive_desc']} · "
-                f"_{first['drive_result']}_"
-            )
-            with st.container(border=True):
-                st.markdown(header)
-                play_cols = ['period','clock','play_type','play_text',
-                             'down_dist_text','stat_yardage','away_score','home_score']
-                disp_p = drive_df[play_cols].copy()
-                disp_p.columns = ['Q','Clock','Type','Play','Situation','Yards','Away','Home']
-
-                def _row_style(row):
-                    if row.name in drive_df.index[drive_df['scoring_play'] == 1]:
-                        return ['background-color:#fff3cd'] * len(row)
-                    if row.name in drive_df.index[drive_df['is_turnover'] == 1]:
-                        return ['background-color:#f8d7da'] * len(row)
-                    return [''] * len(row)
-
-                st.dataframe(
-                    disp_p.style.apply(_row_style, axis=1),
-                    use_container_width=True, hide_index=True,
+        if is_football:
+            # ── Football: drive-by-drive breakdown ────────────
+            st.markdown("**Drives**")
+            for drive_num, drive_df in df_all.groupby('drive_num', sort=True):
+                first = drive_df.iloc[0]
+                score_icon = "🏈" if first['drive_is_score'] else ""
+                header = (
+                    f"{score_icon} **{first['team_abbr'] or '—'}** · "
+                    f"{first['drive_desc']} · "
+                    f"_{first['drive_result']}_"
                 )
+                with st.container(border=True):
+                    st.markdown(header)
+                    play_cols = ['period', 'clock', 'play_type', 'play_text',
+                                 'down_dist_text', 'stat_yardage', 'away_score', 'home_score']
+                    disp_p = drive_df[play_cols].copy()
+                    disp_p.columns = ['Q', 'Clock', 'Type', 'Play', 'Situation', 'Yards', 'Away', 'Home']
+                    scoring_idx = set(drive_df.index[drive_df['scoring_play'] == 1])
+                    turnover_idx = set(drive_df.index[drive_df['is_turnover'] == 1])
+
+                    def _row_style(row, _s=scoring_idx, _t=turnover_idx):
+                        if row.name in _s:
+                            return ['background-color:#fff3cd'] * len(row)
+                        if row.name in _t:
+                            return ['background-color:#f8d7da'] * len(row)
+                        return [''] * len(row)
+
+                    st.dataframe(
+                        disp_p.style.apply(_row_style, axis=1),
+                        use_container_width=True, hide_index=True,
+                    )
+
+        else:
+            # ── Non-football: flat chronological play list ────
+            _period_full  = {'basketball': 'Quarter', 'baseball': 'Inning',
+                             'hockey': 'Period', 'soccer': 'Half'}
+            _period_short = {'basketball': 'Q', 'baseball': 'Inn',
+                             'hockey': 'P', 'soccer': 'H'}
+            per_full  = _period_full.get(category, 'Period')
+            per_short = _period_short.get(category, 'Per')
+
+            all_periods = sorted(df_all['period'].dropna().unique().tolist())
+            sel_per = st.selectbox(
+                f"Filter by {per_full}",
+                ['All'] + [str(int(p)) for p in all_periods],
+                key=f"pbp_per_{event_id}"
+            )
+            df_show = df_all if sel_per == 'All' else df_all[df_all['period'] == int(sel_per)]
+
+            n_scoring = int(df_show['scoring_play'].sum())
+            legend = f"  ·  🟡 = Scoring play ({n_scoring})" if n_scoring else ""
+            st.caption(f"{len(df_show)} plays{legend}")
+
+            play_cols = ['period', 'clock', 'play_type', 'play_text', 'away_score', 'home_score']
+            disp = df_show[play_cols].rename(columns={
+                'period': per_short, 'clock': 'Clock', 'play_type': 'Type',
+                'play_text': 'Play', 'away_score': 'Away', 'home_score': 'Home',
+            })
+            scoring_idx = set(df_show.index[df_show['scoring_play'] == 1])
+
+            def _flat_style(row, _s=scoring_idx):
+                return ['background-color:#fff3cd' if row.name in _s else ''] * len(row)
+
+            st.dataframe(
+                disp.style.apply(_flat_style, axis=1),
+                use_container_width=True, hide_index=True,
+            )
 
 
 # ─────────────────────────────────────────────────────────────
