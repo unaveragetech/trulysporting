@@ -2,6 +2,7 @@
 
 Real-time sports scores, trends, news, rankings & analytics — powered by ESPN's public APIs and built with Streamlit.
 
+https://unaveragetech.github.io/trulysporting/
 ## Features
 
 - 🏅 **Scoreboard** — Live & recent game scores with period-by-period breakdowns
