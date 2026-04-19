@@ -3207,66 +3207,59 @@ def _render_donation_page():
 # ─────────────────────────────────────────────────────────────
 
 # ─────────────────────────────────────────────────────────────
-# GOOGLE ADSENSE INJECTION
-# Replace the placeholder values below with your real AdSense
-# publisher ID and ad slot once your account is approved.
-# Leave ADSENSE_CLIENT and ADSENSE_SLOT as empty strings to
-# disable injection entirely (safe for local dev).
+# GOOGLE ADSENSE — AUTO ADS
+# Uses Google Auto Ads: no ad-slot needed. Google automatically
+# finds the best positions and formats for ads on the page.
+# Set ADSENSE_CLIENT to your publisher ID to enable.
+# Leave as empty string to disable (safe for local dev).
 # ─────────────────────────────────────────────────────────────
-ADSENSE_CLIENT = ""   # e.g. "ca-pub-XXXXXXXXXXXXXXXX"
-ADSENSE_SLOT   = ""   # e.g. "1234567890"
+ADSENSE_CLIENT = "ca-pub-8003312242019311"
 
 def inject_adsense() -> None:
-    """Inject Google AdSense into Streamlit's static index.html.
-    Only runs when ADSENSE_CLIENT and ADSENSE_SLOT are populated.
-    Safe to call on every rerun — skips injection if already present.
+    """Inject Google AdSense Auto Ads into Streamlit's static index.html.
+    Only runs when ADSENSE_CLIENT is set.
+    Safe to call on every rerun — skips if already injected.
     """
-    if not ADSENSE_CLIENT or not ADSENSE_SLOT:
+    if not ADSENSE_CLIENT:
         return
     try:
-        from bs4 import BeautifulSoup  # pip install beautifulsoup4
+        from bs4 import BeautifulSoup
     except ImportError:
         logging.warning("AdSense injection skipped: beautifulsoup4 not installed.")
         return
 
-    adsense_script_url = (
+    adsense_script_src = (
         f"https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
+        f"?client={ADSENSE_CLIENT}"
     )
-    adsense_block = f"""
-      <!-- Google AdSense -->
-      <script async
-        src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
-        data-ad-client="{ADSENSE_CLIENT}"></script>
-      <ins class="adsbygoogle"
-           style="display:block"
-           data-ad-client="{ADSENSE_CLIENT}"
-           data-ad-slot="{ADSENSE_SLOT}"
-           data-ad-format="auto"
-           data-full-width-responsive="true"></ins>
-      <script>(adsbygoogle = window.adsbygoogle || []).push({{}});</script>
-    """
+    # Auto Ads only needs this single <script> tag — Google handles placement.
+    adsense_block = (
+        f'\n  <!-- Google AdSense Auto Ads -->\n'
+        f'  <script async src="{adsense_script_src}"'
+        f' crossorigin="anonymous"></script>\n'
+    )
 
     index_path = pathlib.Path(st.__file__).parent / "static" / "index.html"
     try:
-        soup = BeautifulSoup(index_path.read_text(encoding="utf-8"), features="html.parser")
+        raw = index_path.read_text(encoding="utf-8")
     except Exception as exc:
         logging.warning(f"AdSense injection: could not read index.html — {exc}")
         return
 
-    # Skip if already injected
-    if soup.find("script", src=adsense_script_url):
+    # Skip if already injected (check for publisher ID in the file)
+    if ADSENSE_CLIENT in raw:
         return
 
     bck_path = index_path.with_suffix(".bck")
-    if bck_path.exists():
-        shutil.copy(bck_path, index_path)   # restore clean copy first
+    if not bck_path.exists():
+        shutil.copy(index_path, bck_path)   # backup pristine file once
     else:
-        shutil.copy(index_path, bck_path)   # make backup of pristine file
+        shutil.copy(bck_path, index_path)   # restore clean copy before patching
+        raw = index_path.read_text(encoding="utf-8")
 
-    raw = index_path.read_text(encoding="utf-8")
-    patched = raw.replace("<head>", "<head>\n" + adsense_block, 1)
+    patched = raw.replace("<head>", "<head>" + adsense_block, 1)
     index_path.write_text(patched, encoding="utf-8")
-    logging.info("AdSense injected into Streamlit index.html")
+    logging.info(f"AdSense Auto Ads injected for {ADSENSE_CLIENT}")
 
 
 def main():
