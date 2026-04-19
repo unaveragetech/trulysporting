@@ -3209,35 +3209,47 @@ def _render_donation_page():
 # ─────────────────────────────────────────────────────────────
 # GOOGLE ADSENSE — ALL 3 VERIFICATION METHODS
 #
-# METHOD 1 — <head> injection via inject_adsense():
-#   Patches Streamlit's static/index.html to add the meta tag
-#   and Auto Ads <script> directly into <head> on app startup.
-#   Falls back silently on read-only filesystems (Streamlit Cloud).
+# METHOD 1 — <head> injection via inject_adsense() [BeautifulSoup]:
+#   Parses Streamlit's static/index.html with BS4, checks for the
+#   AdSense script tag via soup.find(), backs up the pristine file,
+#   then injects meta + script directly into <head>.
 #
 # METHOD 2 — st.html() body-level sticky banner:
 #   Renders <meta>, <script>, and a visible <ins> ad unit on
 #   EVERY page state (landing, ToS, main app) via st.html().
 #   Google's crawler executes JS and finds this on every load.
 #
-# METHOD 3 — ads.txt:
-#   File: static/ads.txt  (served at /app/static/ads.txt)
+# METHOD 3 — ads.txt (GitHub Pages):
+#   docs/ads.txt served at unaveragetech.github.io/trulysporting/ads.txt
 #   Content: google.com, pub-8003312242019311, DIRECT, f08c47fec0942fa0
-#   Enabled by: .streamlit/config.toml  [server] enableStaticServing=true
+#   GitHub Pages (docs/ folder on main branch) = true root-level serving.
 # ─────────────────────────────────────────────────────────────
-ADSENSE_CLIENT = "ca-pub-8003312242019311"
+ADSENSE_CLIENT  = "ca-pub-8003312242019311"
+# Base URL used for both script src checks and injection
+_ADSENSE_JS_URL = "https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
 
 def inject_adsense() -> None:
-    """METHOD 1 — Inject meta tag + Auto Ads script into Streamlit's index.html <head>.
-    Uses only stdlib. Safe to call every rerun — skips if already injected.
+    """METHOD 1 — BeautifulSoup-based injection into Streamlit's index.html <head>.
+
+    Follows the approach from comparepriceacross.com/post/integrate_google_adsense_in_streamlit_apps:
+      1. Parse index.html with BeautifulSoup
+      2. Check for existing AdSense script via soup.find() — avoids double-injection
+      3. Backup the pristine file (or restore from backup before re-patching)
+      4. Insert meta tag + Auto Ads script after <head>
     """
     if not ADSENSE_CLIENT:
         return
 
-    adsense_script_src = (
-        f"https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
-        f"?client={ADSENSE_CLIENT}"
-    )
-    adsense_block = (
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        logging.warning("AdSense injection skipped: install beautifulsoup4")
+        return
+
+    adsense_script_src = f"{_ADSENSE_JS_URL}?client={ADSENSE_CLIENT}"
+
+    # The full block injected into <head>
+    GA_AdSense = (
         f'\n  <!-- Google AdSense — Method 1: head injection -->\n'
         f'  <meta name="google-adsense-account" content="{ADSENSE_CLIENT}">\n'
         f'  <script async src="{adsense_script_src}"'
@@ -3245,29 +3257,29 @@ def inject_adsense() -> None:
     )
 
     index_path = pathlib.Path(st.__file__).parent / "static" / "index.html"
+    logging.info(f"AdSense: editing {index_path}")
+
     try:
-        raw = index_path.read_text(encoding="utf-8")
+        soup = BeautifulSoup(index_path.read_text(encoding="utf-8"), features="html.parser")
     except Exception as exc:
         logging.warning(f"AdSense injection: could not read index.html — {exc}")
         return
 
-    # Skip if already injected
-    if ADSENSE_CLIENT in raw:
-        return
+    # soup.find("script", src=...) — proper HTML parse check, not a string search
+    if not soup.find("script", src=adsense_script_src):
+        bck_index = index_path.with_suffix(".bck")
+        try:
+            if bck_index.exists():
+                shutil.copy(bck_index, index_path)   # restore clean copy first
+            else:
+                shutil.copy(index_path, bck_index)   # backup pristine file once
 
-    bck_path = index_path.with_suffix(".bck")
-    try:
-        if not bck_path.exists():
-            shutil.copy(index_path, bck_path)  # backup pristine file once
-        else:
-            shutil.copy(bck_path, index_path)  # restore clean copy before patching
-            raw = index_path.read_text(encoding="utf-8")
-
-        patched = raw.replace("<head>", "<head>" + adsense_block, 1)
-        index_path.write_text(patched, encoding="utf-8")
-        logging.info(f"AdSense Auto Ads injected into index.html for {ADSENSE_CLIENT}")
-    except OSError as exc:
-        logging.warning(f"AdSense index.html write failed (read-only fs?): {exc}")
+            html = str(soup)
+            new_html = html.replace("<head>", "<head>\n" + GA_AdSense)
+            index_path.write_text(new_html, encoding="utf-8")
+            logging.info(f"AdSense injected into index.html for {ADSENSE_CLIENT}")
+        except OSError as exc:
+            logging.warning(f"AdSense index.html write failed (read-only fs?): {exc}")
 
 
 def main():
@@ -3447,10 +3459,7 @@ def main():
     # <script>, and a visible <ins> ad unit. Google's headless
     # crawler executes JS and finds all three tags on every load.
     if ADSENSE_CLIENT:
-        _adsense_src = (
-            f"https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
-            f"?client={ADSENSE_CLIENT}"
-        )
+        _adsense_src = f"{_ADSENSE_JS_URL}?client={ADSENSE_CLIENT}"
         st.html(f"""
 <!-- Google AdSense — Method 2: body injection -->
 <meta name="google-adsense-account" content="{ADSENSE_CLIENT}">
