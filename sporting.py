@@ -1062,9 +1062,38 @@ class SportsDB:
         if c.fetchone()[0] == 0:
             defaults = [
                 ('default_refresh_interval', '3600'),
-                ('active_endpoints', json.dumps(['football/nfl', 'basketball/nba'])),
+                ('active_endpoints', json.dumps([
+                    'football/nfl',
+                    'football/college-football',
+                    'basketball/nba',
+                    'basketball/wnba',
+                    'basketball/mens-college-basketball',
+                    'basketball/womens-college-basketball',
+                    'baseball/mlb',
+                    'baseball/college-baseball',
+                    'hockey/nhl',
+                    'soccer/eng.1',
+                    'soccer/usa.1',
+                ])),
             ]
             c.executemany("INSERT OR IGNORE INTO config VALUES (?, ?)", defaults)
+
+        # Migration: if active_endpoints only has the old minimal defaults,
+        # expand to the full league list so existing deployments get all leagues.
+        _all_known = [
+            'football/nfl', 'football/college-football',
+            'basketball/nba', 'basketball/wnba',
+            'basketball/mens-college-basketball', 'basketball/womens-college-basketball',
+            'baseball/mlb', 'baseball/college-baseball',
+            'hockey/nhl', 'soccer/eng.1', 'soccer/usa.1',
+        ]
+        _row = c.execute("SELECT value FROM config WHERE key='active_endpoints'").fetchone()
+        if _row:
+            _current = json.loads(_row[0])
+            # If still only the original two defaults, upgrade to full list
+            if set(_current) <= {'football/nfl', 'basketball/nba'}:
+                c.execute("UPDATE config SET value=? WHERE key='active_endpoints'",
+                          (json.dumps(_all_known),))
 
         conn.commit()
         conn.close()
@@ -3548,6 +3577,18 @@ def main():
 
         all_eps = EndpointRegistry.get_all_keys()
         current_active = json.loads(db.get_config('active_endpoints', '[]'))
+
+        # Quick-select buttons
+        _sb_col1, _sb_col2 = st.columns(2)
+        if _sb_col1.button("✅ All", use_container_width=True, help="Select all leagues"):
+            current_active = all_eps
+            db.update_config('active_endpoints', json.dumps(current_active))
+            st.rerun()
+        if _sb_col2.button("🗑 Clear", use_container_width=True, help="Deselect all leagues"):
+            current_active = []
+            db.update_config('active_endpoints', json.dumps(current_active))
+            st.rerun()
+
         new_active = st.multiselect("Active Leagues", all_eps, default=current_active)
 
         if st.button("💾 Save Config"):
