@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="TrulySporting Analytics — real-time sports scores, trends, news and rankings powered by ESPN APIs.">
+
+  <!-- ═══════════════════════════════════════════════════════
+       GOOGLE ADSENSE VERIFICATION
+       All three required signals are present in this <head>:
+       1. google-adsense-account meta tag
+       2. Auto Ads script tag
+       3. ads.txt served at /ads.txt (see docs/ads.txt)
+  ════════════════════════════════════════════════════════ -->
+  <meta name="google-adsense-account" content="ca-pub-8003312242019311">
+  <script async
+    src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8003312242019311"
+    crossorigin="anonymous"></script>
+
+  <title>TrulySporting Analytics 🏆</title>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+      background: linear-gradient(135deg, #0d1b2a 0%, #1a2e45 50%, #0d1b2a 100%);
+      color: #f3f4f6;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+
+    .card {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 20px;
+      padding: 2.5rem 3rem;
+      max-width: 680px;
+      width: 100%;
+      text-align: center;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+    }
+
+    .trophy { font-size: 4rem; margin-bottom: 0.5rem; }
+
+    h1 {
+      font-size: 2.2rem;
+      font-weight: 800;
+      background: linear-gradient(90deg, #f59e0b, #ef4444, #3b82f6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 0.4rem;
+    }
+
+    .tagline {
+      font-size: 1.05rem;
+      color: #9ca3af;
+      margin-bottom: 2rem;
+    }
+
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 2rem;
+    }
+
+    .feature {
+      background: rgba(255,255,255,0.06);
+      border-radius: 10px;
+      padding: 0.75rem 0.5rem;
+      font-size: 0.85rem;
+      color: #d1d5db;
+    }
+
+    .feature .icon { font-size: 1.4rem; display: block; margin-bottom: 0.3rem; }
+
+    .launch-btn {
+      display: inline-block;
+      background: linear-gradient(135deg, #f59e0b, #ef4444);
+      color: #fff;
+      font-size: 1.15rem;
+      font-weight: 700;
+      padding: 0.85rem 2.5rem;
+      border-radius: 50px;
+      text-decoration: none;
+      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 4px 20px rgba(239,68,68,0.35);
+      margin-bottom: 1.2rem;
+    }
+
+    .launch-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 28px rgba(239,68,68,0.5);
+    }
+
+    .countdown {
+      font-size: 0.9rem;
+      color: #6b7280;
+      margin-top: 0.5rem;
+    }
+
+    #seconds { color: #f59e0b; font-weight: 700; }
+
+    .ad-slot {
+      margin-top: 2rem;
+      width: 100%;
+    }
+
+    footer {
+      margin-top: 2.5rem;
+      font-size: 0.78rem;
+      color: #4b5563;
+      text-align: center;
+    }
+
+    footer a { color: #6b7280; text-decoration: none; }
+    footer a:hover { color: #9ca3af; }
+  </style>
+
+  <!-- Auto-redirect to Streamlit app -->
+  <script>
+    // UPDATE THIS URL once your Streamlit Cloud app is deployed
+    var STREAMLIT_URL = "https://trulysporting.streamlit.app";
+    var countdown = 8;
+
+    function tick() {
+      var el = document.getElementById('seconds');
+      if (el) el.textContent = countdown;
+      if (countdown <= 0) {
+        window.location.href = STREAMLIT_URL;
+      } else {
+        countdown--;
+        setTimeout(tick, 1000);
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', function() {
+      tick();
+      // Wire up the launch button
+      var btn = document.getElementById('launch-btn');
+      if (btn) btn.href = STREAMLIT_URL;
+    });
+  </script>
+</head>
+<body>
+
+  <div class="card">
+    <div class="trophy">🏆</div>
+    <h1>TrulySporting Analytics</h1>
+    <p class="tagline">Real-time scores, trends, news &amp; rankings — powered by ESPN APIs</p>
+
+    <div class="features">
+      <div class="feature"><span class="icon">🏅</span>Live Scoreboard</div>
+      <div class="feature"><span class="icon">📈</span>Team Trends</div>
+      <div class="feature"><span class="icon">📰</span>Latest News</div>
+      <div class="feature"><span class="icon">🏆</span>Rankings</div>
+      <div class="feature"><span class="icon">🏟</span>Team Stats</div>
+      <div class="feature"><span class="icon">📋</span>Custom Views</div>
+    </div>
+
+    <a id="launch-btn" class="launch-btn" href="https://trulysporting.streamlit.app">
+      🚀 Launch the App
+    </a>
+
+    <p class="countdown">Redirecting automatically in <span id="seconds">8</span> seconds…</p>
+
+    <!-- AdSense display unit — visible to Google's crawler -->
+    <div class="ad-slot">
+      <ins class="adsbygoogle"
+           style="display:block;min-height:90px;"
+           data-ad-client="ca-pub-8003312242019311"
+           data-ad-format="auto"
+           data-full-width-responsive="true"></ins>
+      <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+    </div>
+  </div>
+
+  <footer>
+    <p>
+      &copy; 2026 TrulySporting &nbsp;|&nbsp;
+      <a href="https://github.com/unaveragetech/trulysporting" target="_blank">GitHub</a>
+      &nbsp;|&nbsp;
+      Data provided by ESPN public APIs
+    </p>
+  </footer>
+
+</body>
+</html>
