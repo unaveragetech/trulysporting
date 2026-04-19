@@ -1997,10 +1997,18 @@ class ESPNWorker:
             summary = ESPNParser.parse_game_summary(data, sport_key)
             if summary:
                 self.db.save_game_summary(summary)
-            # Extract play-by-play (football uses drives; other sports use scoringPlays)
-            drives = (data.get('drives') or {}).get('previous', [])
-            if drives and not self.db.has_pbp(event_id):
-                self.db.save_play_by_play(event_id, sport_key, drives)
+            # Extract play-by-play (football uses drives; all other sports use flat plays list)
+            if not self.db.has_pbp(event_id):
+                drives = (data.get('drives') or {}).get('previous', [])
+                if drives:
+                    # Football: drives contain nested plays[]
+                    self.db.save_play_by_play(event_id, sport_key, drives)
+                else:
+                    # Basketball, hockey, baseball, soccer: flat plays list
+                    flat_plays = data.get('plays') or data.get('scoringPlays') or []
+                    if flat_plays:
+                        # Wrap as a synthetic single drive so save_play_by_play works unchanged
+                        self.db.save_play_by_play(event_id, sport_key, [{'plays': flat_plays, 'description': 'Plays'}])
             return data
         except Exception as e:
             self.last_error = str(e)
