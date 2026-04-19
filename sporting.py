@@ -3217,24 +3217,20 @@ ADSENSE_CLIENT = "ca-pub-8003312242019311"
 
 def inject_adsense() -> None:
     """Inject Google AdSense Auto Ads into Streamlit's static index.html.
+    Uses only stdlib — no BeautifulSoup required.
     Only runs when ADSENSE_CLIENT is set.
     Safe to call on every rerun — skips if already injected.
     """
     if not ADSENSE_CLIENT:
-        return
-    try:
-        from bs4 import BeautifulSoup
-    except ImportError:
-        logging.warning("AdSense injection skipped: beautifulsoup4 not installed.")
         return
 
     adsense_script_src = (
         f"https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
         f"?client={ADSENSE_CLIENT}"
     )
-    # Auto Ads only needs this single <script> tag — Google handles placement.
     adsense_block = (
         f'\n  <!-- Google AdSense Auto Ads -->\n'
+        f'  <meta name="google-adsense-account" content="{ADSENSE_CLIENT}">\n'
         f'  <script async src="{adsense_script_src}"'
         f' crossorigin="anonymous"></script>\n'
     )
@@ -3246,20 +3242,23 @@ def inject_adsense() -> None:
         logging.warning(f"AdSense injection: could not read index.html — {exc}")
         return
 
-    # Skip if already injected (check for publisher ID in the file)
+    # Skip if already injected
     if ADSENSE_CLIENT in raw:
         return
 
     bck_path = index_path.with_suffix(".bck")
-    if not bck_path.exists():
-        shutil.copy(index_path, bck_path)   # backup pristine file once
-    else:
-        shutil.copy(bck_path, index_path)   # restore clean copy before patching
-        raw = index_path.read_text(encoding="utf-8")
+    try:
+        if not bck_path.exists():
+            shutil.copy(index_path, bck_path)  # backup pristine file once
+        else:
+            shutil.copy(bck_path, index_path)  # restore clean copy before patching
+            raw = index_path.read_text(encoding="utf-8")
 
-    patched = raw.replace("<head>", "<head>" + adsense_block, 1)
-    index_path.write_text(patched, encoding="utf-8")
-    logging.info(f"AdSense Auto Ads injected for {ADSENSE_CLIENT}")
+        patched = raw.replace("<head>", "<head>" + adsense_block, 1)
+        index_path.write_text(patched, encoding="utf-8")
+        logging.info(f"AdSense Auto Ads injected into index.html for {ADSENSE_CLIENT}")
+    except OSError as exc:
+        logging.warning(f"AdSense index.html write failed (read-only fs?): {exc}")
 
 
 def main():
@@ -3432,6 +3431,20 @@ def main():
     ::-webkit-scrollbar-thumb { background: #c1c6d4; border-radius: 3px; }
     </style>
     """)
+
+    # ── ADSENSE — body-level injection (verification fallback) ──
+    # Renders the script + meta tag in the page DOM on every load.
+    # Google's crawler finds this even if the index.html write above
+    # failed due to a read-only filesystem on Streamlit Cloud.
+    if ADSENSE_CLIENT:
+        _adsense_src = (
+            f"https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
+            f"?client={ADSENSE_CLIENT}"
+        )
+        st.html(
+            f'<meta name="google-adsense-account" content="{ADSENSE_CLIENT}">'
+            f'<script async src="{_adsense_src}" crossorigin="anonymous"></script>'
+        )
 
     # ── INITIALISE ────────────────────────────────────────────
     if 'db' not in st.session_state:
