@@ -3432,19 +3432,45 @@ def main():
     </style>
     """)
 
-    # ── ADSENSE — body-level injection (verification fallback) ──
-    # Renders the script + meta tag in the page DOM on every load.
-    # Google's crawler finds this even if the index.html write above
-    # failed due to a read-only filesystem on Streamlit Cloud.
+    # ── ADSENSE — sticky banner overlay ──────────────────────
+    # Rendered on EVERY page state (landing, ToS, main app) so
+    # Google's crawler always finds the verification tag and Auto
+    # Ads script regardless of which gate is active.
+    # The sticky bar also satisfies AdSense's requirement that ad
+    # code is visible on the live page before approval.
     if ADSENSE_CLIENT:
         _adsense_src = (
             f"https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
             f"?client={ADSENSE_CLIENT}"
         )
-        st.html(
-            f'<meta name="google-adsense-account" content="{ADSENSE_CLIENT}">'
-            f'<script async src="{_adsense_src}" crossorigin="anonymous"></script>'
-        )
+        st.html(f"""
+<meta name="google-adsense-account" content="{ADSENSE_CLIENT}">
+<script async src="{_adsense_src}" crossorigin="anonymous"></script>
+<style>
+  #ts-ad-bar {{
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    z-index: 99999;
+    background: #fff;
+    border-top: 1px solid #d0d5e0;
+    padding: 4px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 60px;
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.08);
+  }}
+  #ts-ad-bar ins {{ display: block; width: 100%; max-width: 728px; }}
+</style>
+<div id="ts-ad-bar">
+  <ins class="adsbygoogle"
+       style="display:block;width:100%;max-width:728px;height:90px;"
+       data-ad-client="{ADSENSE_CLIENT}"
+       data-ad-format="auto"
+       data-full-width-responsive="true"></ins>
+  <script>(adsbygoogle = window.adsbygoogle || []).push({{}});</script>
+</div>
+""")
 
     # ── INITIALISE ────────────────────────────────────────────
     if 'db' not in st.session_state:
