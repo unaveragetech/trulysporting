@@ -5576,7 +5576,8 @@ def main():
             _mc_cs = _out.columns(_mc_n)
             for _mci, (_, _mr) in enumerate(_df.head(_mc_n).iterrows()):
                 _mv = _mr[_cy] if _cy and _cy in _mr else '—'
-                _mc_cs[_mci].metric(_mr[_cx], _mv)
+                _label = str(_mr[_cx]) if _mr[_cx] is not None else '—'
+                _mc_cs[_mci].metric(_label, _mv)
 
     # ── TAB 7: SCHEMA EXPLORER ────────────────────────────────
     with tab7:
