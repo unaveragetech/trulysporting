@@ -3207,19 +3207,28 @@ def _render_donation_page():
 # ─────────────────────────────────────────────────────────────
 
 # ─────────────────────────────────────────────────────────────
-# GOOGLE ADSENSE — AUTO ADS
-# Uses Google Auto Ads: no ad-slot needed. Google automatically
-# finds the best positions and formats for ads on the page.
-# Set ADSENSE_CLIENT to your publisher ID to enable.
-# Leave as empty string to disable (safe for local dev).
+# GOOGLE ADSENSE — ALL 3 VERIFICATION METHODS
+#
+# METHOD 1 — <head> injection via inject_adsense():
+#   Patches Streamlit's static/index.html to add the meta tag
+#   and Auto Ads <script> directly into <head> on app startup.
+#   Falls back silently on read-only filesystems (Streamlit Cloud).
+#
+# METHOD 2 — st.html() body-level sticky banner:
+#   Renders <meta>, <script>, and a visible <ins> ad unit on
+#   EVERY page state (landing, ToS, main app) via st.html().
+#   Google's crawler executes JS and finds this on every load.
+#
+# METHOD 3 — ads.txt:
+#   File: static/ads.txt  (served at /app/static/ads.txt)
+#   Content: google.com, pub-8003312242019311, DIRECT, f08c47fec0942fa0
+#   Enabled by: .streamlit/config.toml  [server] enableStaticServing=true
 # ─────────────────────────────────────────────────────────────
 ADSENSE_CLIENT = "ca-pub-8003312242019311"
 
 def inject_adsense() -> None:
-    """Inject Google AdSense Auto Ads into Streamlit's static index.html.
-    Uses only stdlib — no BeautifulSoup required.
-    Only runs when ADSENSE_CLIENT is set.
-    Safe to call on every rerun — skips if already injected.
+    """METHOD 1 — Inject meta tag + Auto Ads script into Streamlit's index.html <head>.
+    Uses only stdlib. Safe to call every rerun — skips if already injected.
     """
     if not ADSENSE_CLIENT:
         return
@@ -3229,7 +3238,7 @@ def inject_adsense() -> None:
         f"?client={ADSENSE_CLIENT}"
     )
     adsense_block = (
-        f'\n  <!-- Google AdSense Auto Ads -->\n'
+        f'\n  <!-- Google AdSense — Method 1: head injection -->\n'
         f'  <meta name="google-adsense-account" content="{ADSENSE_CLIENT}">\n'
         f'  <script async src="{adsense_script_src}"'
         f' crossorigin="anonymous"></script>\n'
@@ -3432,18 +3441,18 @@ def main():
     </style>
     """)
 
-    # ── ADSENSE — sticky banner overlay ──────────────────────
-    # Rendered on EVERY page state (landing, ToS, main app) so
-    # Google's crawler always finds the verification tag and Auto
-    # Ads script regardless of which gate is active.
-    # The sticky bar also satisfies AdSense's requirement that ad
-    # code is visible on the live page before approval.
+    # ── ADSENSE METHOD 2 — body-level sticky banner ──────────
+    # Rendered on EVERY page state (landing, ToS, main app).
+    # Includes: <meta name="google-adsense-account">, Auto Ads
+    # <script>, and a visible <ins> ad unit. Google's headless
+    # crawler executes JS and finds all three tags on every load.
     if ADSENSE_CLIENT:
         _adsense_src = (
             f"https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
             f"?client={ADSENSE_CLIENT}"
         )
         st.html(f"""
+<!-- Google AdSense — Method 2: body injection -->
 <meta name="google-adsense-account" content="{ADSENSE_CLIENT}">
 <script async src="{_adsense_src}" crossorigin="anonymous"></script>
 <style>
