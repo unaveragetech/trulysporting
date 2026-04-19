@@ -146,18 +146,20 @@ class ESPNParser:
                 venue_name = venue.get('fullName', '')
                 venue_city = venue.get('address', {}).get('city', '')
 
-                # Game links (boxscore, recap, gamecast) from event-level links
+                # Game links (boxscore, recap, gamecast, pbp) from event-level AND
+                # competition-level links — many non-football sports only put pbp at comp level
                 event_links = {}
-                for link in event.get('links', []):
-                    rels = link.get('rel', [])
-                    if 'boxscore' in rels:
-                        event_links['boxscore'] = link.get('href', '')
-                    elif 'recap' in rels:
-                        event_links['recap'] = link.get('href', '')
-                    elif 'summary' in rels:
-                        event_links['summary'] = link.get('href', '')
-                    elif 'pbp' in rels:
-                        event_links['pbp'] = link.get('href', '')
+                _link_keys = {
+                    'boxscore': 'boxscore', 'recap': 'recap',
+                    'summary': 'summary', 'pbp': 'pbp',
+                    'gamecast': 'gamecast', 'highlights': 'highlights',
+                }
+                for _src in (event.get('links', []), comp.get('links', [])):
+                    for link in _src:
+                        rels = link.get('rel', [])
+                        for rel_key, store_key in _link_keys.items():
+                            if rel_key in rels and store_key not in event_links:
+                                event_links[store_key] = link.get('href', '')
 
                 # Special event note (Super Bowl, Play-In, etc.)
                 note = ''
