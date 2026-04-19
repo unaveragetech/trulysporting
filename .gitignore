@@ -1,0 +1,26 @@
+# SQLite database files (auto-created at runtime)
+*.db
+*.db-shm
+*.db-wal
+
+# Streamlit index.html backup (created by AdSense injector)
+*.bck
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE / OS files
+.qodo/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets (never commit real secrets)
+.streamlit/secrets.toml
+
+# Custom views output (runtime generated)
+custom_views/public/
