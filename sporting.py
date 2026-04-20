@@ -1664,6 +1664,25 @@ class SportsDB:
             conn.commit()
         conn.close()
 
+    def get_game_summary(self, event_id: str) -> Optional[Dict]:
+        """Return the stored game summary dict for event_id, or None if not found."""
+        conn = self.get_connection()
+        row = conn.execute(
+            "SELECT * FROM game_summaries WHERE event_id=?", (str(event_id),)
+        ).fetchone()
+        conn.close()
+        if row is None:
+            return None
+        cols = [
+            'event_id', 'sport_key', 'home_stats_json', 'away_stats_json',
+            'leaders_json', 'last_five_home', 'last_five_away', 'injuries_json',
+            'standings_json', 'venue_name', 'venue_city', 'odds_json',
+            'player_stats_json', 'team_stats_full_json', 'officials_json',
+            'videos_json', 'win_prob_json', 'scoring_plays_json', 'pickcenter_json',
+            'home_abbr', 'away_abbr', 'fetched_at',
+        ]
+        return dict(zip(cols, row))
+
     def get_player_game_log(self, sport_key: str, player_name: str) -> pd.DataFrame:
         """Return per-game stat rows for a named player in a sport."""
         conn = self.get_connection()
