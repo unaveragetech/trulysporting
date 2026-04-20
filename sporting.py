@@ -4914,6 +4914,146 @@ def main():
             st.session_state['app_started'] = False
             st.rerun()
 
+    # ── How-It-Works expander placed at the top of every tab ──────────────────
+    _HOW_IT_WORKS = {
+        'scoreboard': {
+            'icon': '🏅',
+            'summary': 'Browse and stream game results for any league you have added.',
+            'steps': [
+                ('1 — Add a league', 'Open the **sidebar** (▶ left edge) → "Manage Leagues" → '
+                 'click **+ Add** next to any league. Active leagues appear across all tabs.'),
+                ('2 — Sync scores',  'Select the league & date, then click **🔄 Sync Scoreboard**. '
+                 'Results are stored locally so they load instantly on repeat visits.'),
+                ('3 — Fetch full detail', 'Click any game row to expand it, then click '
+                 '**📊 Fetch Summary**. This stores box scores, PBP, injuries, betting odds, '
+                 'and win probability — all used by the Players & Schema tabs.'),
+                ('Why is my date blank?', 'The date picker defaults to today. If your league '
+                 'is in off-season, pick a date when games were played and sync again.'),
+            ],
+        },
+        'team_trends': {
+            'icon': '📈',
+            'summary': 'Analyse a team\'s season-over-season form, scoring patterns, and head-to-head records.',
+            'steps': [
+                ('1 — Prerequisite', 'Sync the **Scoreboard** tab for this league first. '
+                 'Team Trends reads from the stored game history table — no live API call needed.'),
+                ('2 — Select league & team', 'Use the dropdowns at the top. If a team is missing, '
+                 'go to the **Teams** tab → Load Teams first.'),
+                ('3 — Pick season', 'Season year follows ESPN convention: football = year the '
+                 'season *starts*; basketball/hockey = year it *ends*.'),
+                ('Why is the chart empty?', 'Sync more scoreboard dates. The chart plots every '
+                 'game in the stored history — the more dates you sync, the richer the view.'),
+            ],
+        },
+        'player_trends': {
+            'icon': '👤',
+            'summary': 'Drill into per-player boxscore stats, game logs, and play-by-play mentions.',
+            'steps': [
+                ('1 — Load Teams', 'Go to the **Teams** tab → select league → **Load Teams**. '
+                 'This fills the team dropdown here.'),
+                ('2 — Load Roster', 'Select a team, then click **🔄 Load Roster**. '
+                 'Players will appear in the dropdown.'),
+                ('3 — Fetch game summaries', 'Go to **Scoreboard** → expand any game → '
+                 '**📊 Fetch Summary**. Do this for multiple games.'),
+                ('4 — Sync Player Stats', 'Click **🔄 Sync Player Stats** (top of this tab) '
+                 'to process all stored summaries into the player boxscore table.'),
+                ('5 — Build Profile', 'Select a player and click **⚙ Build Profile** to '
+                 'aggregate bio, game log, and PBP data into a single cached view.'),
+                ('PBP fallback', 'If no boxscore stats exist, the app auto-derives estimates '
+                 'from play-by-play text (abbreviated names like *S.Darnold*).'),
+            ],
+        },
+        'teams': {
+            'icon': '🏟',
+            'summary': 'Browse full team rosters, records, venues, and coaching staff.',
+            'steps': [
+                ('1 — Add a league', 'Add leagues via the sidebar first.'),
+                ('2 — Load Teams', 'Select a league and click **Load Teams**. '
+                 'This fetches all teams in the league from ESPN and caches them locally.'),
+                ('3 — Load Detail',  'Click any team row to expand it, then **Load Detail** '
+                 'for venue, coaching staff, and season record.'),
+                ('Why are no teams listed?', 'You must click Load Teams at least once per '
+                 'league. Teams are not auto-fetched to avoid unnecessary API calls.'),
+            ],
+        },
+        'news': {
+            'icon': '📰',
+            'summary': 'Latest headlines and full article previews from ESPN\'s news feed.',
+            'steps': [
+                ('1 — Add leagues', 'Add leagues in the sidebar.'),
+                ('2 — Auto-sync', 'News is fetched automatically each time the Scoreboard '
+                 'tab syncs. You can also force a refresh from the sidebar.'),
+                ('3 — Click to read', 'Each headline card links to the full ESPN article.'),
+                ('Missing sport?', 'Not all ESPN endpoints include a news feed '
+                 '(e.g. some international soccer leagues). If the feed is empty, '
+                 'that league\'s ESPN API does not expose a news endpoint.'),
+            ],
+        },
+        'rankings': {
+            'icon': '🏆',
+            'summary': 'Poll rankings (AP, Coaches Poll) and division/conference standings.',
+            'steps': [
+                ('1 — Sync Scoreboard', 'Standings and rankings are fetched as part of the '
+                 'normal scoreboard sync — just sync any date for your league.'),
+                ('2 — Select league', 'Use the league selector at the top of this tab.'),
+                ('Standings vs Rankings', 'Standings (wins/losses) are available for all '
+                 'leagues. Poll Rankings (AP 25 etc.) are only available for college sports.'),
+                ('Why empty?', 'If standings are missing, the league may not be in-season '
+                 'or the standings endpoint may not be available for that sport.'),
+            ],
+        },
+        'network': {
+            'icon': '🌐',
+            'summary': 'Monitor the distributed job queue — worker nodes, pending jobs, and errors.',
+            'steps': [
+                ('What is this?', 'TrulySporting can run multiple data-fetching workers '
+                 'across machines. This tab shows the health of that network.'),
+                ('Local mode', 'If you\'re running a single machine, you\'ll '
+                 'see one local node and a queue that clears quickly.'),
+                ('Stuck jobs?', 'If jobs stay "pending" for a long time, the worker '
+                 'process may have restarted. Click the local sync buttons on other '
+                 'tabs to re-process them.'),
+            ],
+        },
+        'schema': {
+            'icon': '🔬',
+            'summary': 'Discover every JSON field ESPN returns and build custom data views from them.',
+            'steps': [
+                ('1 — Crawl endpoints', 'Click **🕷 Crawl Endpoints** to fetch every ESPN '
+                 'API endpoint once and record ALL JSON field paths, types, and example values. '
+                 'This takes ~30 seconds and only needs to be done once (or after ESPN updates their API).'),
+                ('2 — Browse fields', 'Use the Field Explorer to search by field name. '
+                 'Find hidden ESPN data your parsers don\'t extract yet.'),
+                ('3 — Build a View', 'Scroll to **Custom View Builder**. Pick a league, '
+                 'a *data source* (any stored DB table), columns, chart type, and optional '
+                 'filter. Preview updates live. Save to disk or session.'),
+                ('Data Sources', 'The view builder reads **directly from your local DB** — '
+                 'not from ESPN live. Sources: Game History, Standings, Rankings, Teams, '
+                 'Roster, Player Boxscore Stats, Play-by-Play, News, Team Detail.'),
+                ('Why are columns empty?', 'A data source shows "(0 rows)" if that table '
+                 'has no data for the selected league yet. Sync or load the relevant tab first.'),
+                ('Saved views', 'Views saved to disk appear on the **📋 Custom Views** tab '
+                 'and persist across app restarts.'),
+            ],
+        },
+    }
+
+    def _render_how_it_works(key: str):
+        """Render a collapsible ℹ️ How this tab works expander using _HOW_IT_WORKS dict."""
+        info = _HOW_IT_WORKS.get(key)
+        if not info:
+            return
+        with st.expander(
+            f"{info['icon']} **How this tab works** — click to expand",
+            expanded=False
+        ):
+            st.markdown(f"**{info['summary']}**")
+            st.markdown("")
+            for heading, body in info['steps']:
+                st.markdown(f"**{heading}**")
+                st.markdown(f"> {body}")
+                st.markdown("")
+
     # ── TABS ──────────────────────────────────────────────────
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs([
         "🏅 Scoreboard",
@@ -7576,146 +7716,6 @@ def main():
             return len(df)
         except Exception:
             return 0
-
-    # ── How-It-Works expander placed at the top of every tab ──────────────────
-    _HOW_IT_WORKS = {
-        'scoreboard': {
-            'icon': '🏅',
-            'summary': 'Browse and stream game results for any league you have added.',
-            'steps': [
-                ('1 — Add a league', 'Open the **sidebar** (▶ left edge) → "Manage Leagues" → '
-                 'click **+ Add** next to any league. Active leagues appear across all tabs.'),
-                ('2 — Sync scores',  'Select the league & date, then click **🔄 Sync Scoreboard**. '
-                 'Results are stored locally so they load instantly on repeat visits.'),
-                ('3 — Fetch full detail', 'Click any game row to expand it, then click '
-                 '**📊 Fetch Summary**. This stores box scores, PBP, injuries, betting odds, '
-                 'and win probability — all used by the Players & Schema tabs.'),
-                ('Why is my date blank?', 'The date picker defaults to today. If your league '
-                 'is in off-season, pick a date when games were played and sync again.'),
-            ],
-        },
-        'team_trends': {
-            'icon': '📈',
-            'summary': 'Analyse a team\'s season-over-season form, scoring patterns, and head-to-head records.',
-            'steps': [
-                ('1 — Prerequisite', 'Sync the **Scoreboard** tab for this league first. '
-                 'Team Trends reads from the stored game history table — no live API call needed.'),
-                ('2 — Select league & team', 'Use the dropdowns at the top. If a team is missing, '
-                 'go to the **Teams** tab → Load Teams first.'),
-                ('3 — Pick season', 'Season year follows ESPN convention: football = year the '
-                 'season *starts*; basketball/hockey = year it *ends*.'),
-                ('Why is the chart empty?', 'Sync more scoreboard dates. The chart plots every '
-                 'game in the stored history — the more dates you sync, the richer the view.'),
-            ],
-        },
-        'player_trends': {
-            'icon': '👤',
-            'summary': 'Drill into per-player boxscore stats, game logs, and play-by-play mentions.',
-            'steps': [
-                ('1 — Load Teams', 'Go to the **Teams** tab → select league → **Load Teams**. '
-                 'This fills the team dropdown here.'),
-                ('2 — Load Roster', 'Select a team, then click **🔄 Load Roster**. '
-                 'Players will appear in the dropdown.'),
-                ('3 — Fetch game summaries', 'Go to **Scoreboard** → expand any game → '
-                 '**📊 Fetch Summary**. Do this for multiple games.'),
-                ('4 — Sync Player Stats', 'Click **🔄 Sync Player Stats** (top of this tab) '
-                 'to process all stored summaries into the player boxscore table.'),
-                ('5 — Build Profile', 'Select a player and click **⚙ Build Profile** to '
-                 'aggregate bio, game log, and PBP data into a single cached view.'),
-                ('PBP fallback', 'If no boxscore stats exist, the app auto-derives estimates '
-                 'from play-by-play text (abbreviated names like *S.Darnold*).'),
-            ],
-        },
-        'teams': {
-            'icon': '🏟',
-            'summary': 'Browse full team rosters, records, venues, and coaching staff.',
-            'steps': [
-                ('1 — Add a league', 'Add leagues via the sidebar first.'),
-                ('2 — Load Teams', 'Select a league and click **Load Teams**. '
-                 'This fetches all teams in the league from ESPN and caches them locally.'),
-                ('3 — Load Detail',  'Click any team row to expand it, then **Load Detail** '
-                 'for venue, coaching staff, and season record.'),
-                ('Why are no teams listed?', 'You must click Load Teams at least once per '
-                 'league. Teams are not auto-fetched to avoid unnecessary API calls.'),
-            ],
-        },
-        'news': {
-            'icon': '📰',
-            'summary': 'Latest headlines and full article previews from ESPN\'s news feed.',
-            'steps': [
-                ('1 — Add leagues', 'Add leagues in the sidebar.'),
-                ('2 — Auto-sync', 'News is fetched automatically each time the Scoreboard '
-                 'tab syncs. You can also force a refresh from the sidebar.'),
-                ('3 — Click to read', 'Each headline card links to the full ESPN article.'),
-                ('Missing sport?', 'Not all ESPN endpoints include a news feed '
-                 '(e.g. some international soccer leagues). If the feed is empty, '
-                 'that league\'s ESPN API does not expose a news endpoint.'),
-            ],
-        },
-        'rankings': {
-            'icon': '🏆',
-            'summary': 'Poll rankings (AP, Coaches Poll) and division/conference standings.',
-            'steps': [
-                ('1 — Sync Scoreboard', 'Standings and rankings are fetched as part of the '
-                 'normal scoreboard sync — just sync any date for your league.'),
-                ('2 — Select league', 'Use the league selector at the top of this tab.'),
-                ('Standings vs Rankings', 'Standings (wins/losses) are available for all '
-                 'leagues. Poll Rankings (AP 25 etc.) are only available for college sports.'),
-                ('Why empty?', 'If standings are missing, the league may not be in-season '
-                 'or the standings endpoint may not be available for that sport.'),
-            ],
-        },
-        'network': {
-            'icon': '🌐',
-            'summary': 'Monitor the distributed job queue — worker nodes, pending jobs, and errors.',
-            'steps': [
-                ('What is this?', 'TrulySporting can run multiple data-fetching workers '
-                 'across machines. This tab shows the health of that network.'),
-                ('Local mode', 'If you\'re running a single machine, you\'ll '
-                 'see one local node and a queue that clears quickly.'),
-                ('Stuck jobs?', 'If jobs stay "pending" for a long time, the worker '
-                 'process may have restarted. Click the local sync buttons on other '
-                 'tabs to re-process them.'),
-            ],
-        },
-        'schema': {
-            'icon': '🔬',
-            'summary': 'Discover every JSON field ESPN returns and build custom data views from them.',
-            'steps': [
-                ('1 — Crawl endpoints', 'Click **🕷 Crawl Endpoints** to fetch every ESPN '
-                 'API endpoint once and record ALL JSON field paths, types, and example values. '
-                 'This takes ~30 seconds and only needs to be done once (or after ESPN updates their API).'),
-                ('2 — Browse fields', 'Use the Field Explorer to search by field name. '
-                 'Find hidden ESPN data your parsers don\'t extract yet.'),
-                ('3 — Build a View', 'Scroll to **Custom View Builder**. Pick a league, '
-                 'a *data source* (any stored DB table), columns, chart type, and optional '
-                 'filter. Preview updates live. Save to disk or session.'),
-                ('Data Sources', 'The view builder reads **directly from your local DB** — '
-                 'not from ESPN live. Sources: Game History, Standings, Rankings, Teams, '
-                 'Roster, Player Boxscore Stats, Play-by-Play, News, Team Detail.'),
-                ('Why are columns empty?', 'A data source shows "(0 rows)" if that table '
-                 'has no data for the selected league yet. Sync or load the relevant tab first.'),
-                ('Saved views', 'Views saved to disk appear on the **📋 Custom Views** tab '
-                 'and persist across app restarts.'),
-            ],
-        },
-    }
-
-    def _render_how_it_works(key: str):
-        """Render a collapsible ℹ️ How this tab works expander using _HOW_IT_WORKS dict."""
-        info = _HOW_IT_WORKS.get(key)
-        if not info:
-            return
-        with st.expander(
-            f"{info['icon']} **How this tab works** — click to expand",
-            expanded=False
-        ):
-            st.markdown(f"**{info['summary']}**")
-            st.markdown("")
-            for heading, body in info['steps']:
-                st.markdown(f"**{heading}**")
-                st.markdown(f"> {body}")
-                st.markdown("")
 
     def _cv_run_view(cfg, parent=None):
         """Render a single custom view config. Pass parent=st for root, or a column."""
