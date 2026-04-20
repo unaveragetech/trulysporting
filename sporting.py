@@ -1343,23 +1343,24 @@ class SportsDB:
                              season_year: int) -> pd.DataFrame:
         """Return ALL stored games for an entire season.
 
-        Season windows:
-        - football:               YYYY-08-01 → YYYY+1-03-01 (captures Super Bowl)
-        - basketball / hockey:    YYYY-09-01 → YYYY+1-07-01
-        - baseball:               YYYY-02-01 → YYYY-11-30
-        - soccer (default):       YYYY-07-01 → YYYY+1-07-01
+        ESPN season-year convention:
+        - football:  season year = year season STARTS  (2025 → Aug 2025 – Mar 2026)
+        - basketball/hockey: season year = year season ENDS (2026 → Oct 2025 – Jul 2026)
+        - baseball:  season year = calendar year       (2026 → Feb 2026 – Nov 2026)
+        - soccer:    season year = year season ENDS    (2026 → Jul 2025 – Jul 2026)
         """
-        import datetime as _dt
-        yr = int(season_year)
+        yr  = int(season_year)
         cat = category.lower()
         if cat == 'football':
             start, end = f'{yr}-08-01', f'{yr+1}-03-01'
         elif cat in ('basketball', 'hockey'):
-            start, end = f'{yr}-09-01', f'{yr+1}-07-01'
+            # season ENDS in yr, so it started in yr-1
+            start, end = f'{yr-1}-09-01', f'{yr}-07-01'
         elif cat == 'baseball':
             start, end = f'{yr}-02-01', f'{yr}-11-30'
         else:
-            start, end = f'{yr}-07-01', f'{yr+1}-07-01'
+            # soccer: season ENDS in yr (e.g. EPL 2025-26 = season 2026)
+            start, end = f'{yr-1}-07-01', f'{yr}-07-01'
 
         conn = self.get_connection()
         df = pd.read_sql_query(
@@ -2084,6 +2085,12 @@ class ESPNWorker:
     def _season_date_ranges(category: str, sport: str, season_year: int) -> list:
         """Return list of (label, params_dict) chunks that together cover a full season.
 
+        ESPN season-year convention:
+        - football:  season year = year season STARTS  → pass season=yr to ESPN API
+        - basketball/hockey: season year = year season ENDS → calendar months start in yr-1
+        - baseball:  season year = calendar year
+        - soccer:    season year = year season ENDS    → calendar months start in yr-1
+
         Football uses ESPN's week+seasontype params (most reliable).
         All other sports use monthly date-range chunks (dates=STARTYYYYMMDD-ENDYYYYMMDD).
         """
@@ -2101,20 +2108,21 @@ class ESPNWorker:
             for w in range(1, 19):
                 chunks.append((f'Week {w}',
                                 {'season': yr, 'seasontype': 2, 'week': w, 'limit': 100}))
-            # Post-season weeks 1-5 (Wild Card, Divisional, Championship, Pro Bowl, Super Bowl)
+            # Post-season weeks 1-5 (Wild Card → Divisional → Championship → Pro Bowl → Super Bowl)
             for w in range(1, 6):
                 chunks.append((f'Post-Week {w}',
                                 {'season': yr, 'seasontype': 3, 'week': w, 'limit': 100}))
         else:
             if cat in ('basketball', 'hockey'):
-                months = [(yr, m) for m in range(10, 13)] + \
-                         [(yr + 1, m) for m in range(1, 7)]
+                # season 2026 = Oct 2025 – Jun 2026
+                months = [(yr - 1, m) for m in range(10, 13)] + \
+                         [(yr, m) for m in range(1, 8)]
             elif cat == 'baseball':
                 months = [(yr, m) for m in range(3, 11)]
             else:
-                # Soccer and other: Jul YYYY – Jun YYYY+1
-                months = [(yr, m) for m in range(7, 13)] + \
-                         [(yr + 1, m) for m in range(1, 7)]
+                # Soccer: season 2026 = Jul 2025 – Jun 2026
+                months = [(yr - 1, m) for m in range(7, 13)] + \
+                         [(yr, m) for m in range(1, 8)]
 
             for m_yr, mo in months:
                 _, last_day = _cal.monthrange(m_yr, mo)
@@ -3907,7 +3915,7 @@ def main():
     # ── INITIALISE ────────────────────────────────────────────
     # Use a schema/API version stamp so stale cached objects are always replaced
     # on deploy. Bump _APP_VER whenever new methods are added to SportsDB or ESPNWorker.
-    _APP_VER = 6  # bump each time new DB/worker methods are added
+    _APP_VER = 7  # bump each time new DB/worker methods are added
 
     def _fresh_init():
         st.session_state.db = SportsDB()
