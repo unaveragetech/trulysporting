@@ -2022,6 +2022,25 @@ class ESPNWorker:
             return yr if now.month <= 9 else yr + 1
         return yr
 
+    @staticmethod
+    def _season_label(category: str, year: int) -> str:
+        """Convert an ESPN season integer to a human-readable range label.
+
+        football   2025 → '2025–2026'  (start-year; season spans two calendar years)
+        basketball 2026 → '2025–2026'  (end-year  ; season started previous year)
+        hockey     2026 → '2025–2026'  (end-year)
+        soccer     2026 → '2025–2026'  (end-year)
+        baseball   2026 → '2026'       (single calendar year)
+        """
+        cat = category.lower()
+        if cat == 'football':
+            return f"{year}\u2013{year + 1}"
+        elif cat == 'baseball':
+            return str(year)
+        else:
+            # basketball, hockey, soccer — end-year convention
+            return f"{year - 1}\u2013{year}"
+
     def fetch_and_process(self, category: str, sport: str, endpoint_type: str,
                           force_refresh: bool = False,
                           params: Optional[Dict] = None) -> Optional[Dict]:
@@ -4331,8 +4350,9 @@ def main():
             with _t2c3:
                 import datetime as _dt
                 _cur_yr = _dt.datetime.now().year
-                _t2_yr_list = list(range(_cur_yr, _cur_yr - 5, -1))
                 _t2_def_yr  = ESPNWorker._espn_season_year(_t2_cat)
+                _t2_base_yr = max(_cur_yr, _t2_def_yr)
+                _t2_yr_list = list(range(_t2_base_yr, _t2_base_yr - 6, -1))
                 # Pre-seed session state so Streamlit uses the correct default
                 # (index= is ignored when the key is already in session_state)
                 _t2_ssn_key = f'trend_season_{_t2_cat}'
@@ -4340,8 +4360,10 @@ def main():
                     st.session_state[_t2_ssn_key] = _t2_def_yr
                 _t2_season = st.selectbox(
                     "Season", _t2_yr_list,
-                    key=_t2_ssn_key
+                    key=_t2_ssn_key,
+                    format_func=lambda y, _c=_t2_cat: ESPNWorker._season_label(_c, y)
                 )
+                _t2_season_lbl = ESPNWorker._season_label(_t2_cat, _t2_season)
 
             with _t2c4:
                 st.write("")
@@ -4388,7 +4410,7 @@ def main():
                 with _h2:
                     st.html(f"<h3 style='margin:0;color:{_t2_color}'>"
                             f"{_t2_name} &nbsp;<span style='font-size:14px;color:#888'>"
-                            f"{_t2_abbr}  ·  {_t2_season} Season</span></h3>")
+                            f"{_t2_abbr}  ·  {_t2_season_lbl} Season</span></h3>")
 
                 if _t2_sched.empty:
                     st.info("No schedule data available for this team / season. Try clicking **🔄 Load** to refresh from ESPN.")
@@ -4637,15 +4659,17 @@ def main():
             _pt_sport_key    = _pt_ep
 
             with _pt_c2:
-                _pt_yr_list = list(range(_pt_cur_yr, _pt_cur_yr - 5, -1))
                 _pt_def_yr  = ESPNWorker._espn_season_year(_pt_cat)
+                _pt_base_yr = max(_pt_cur_yr, _pt_def_yr)
+                _pt_yr_list = list(range(_pt_base_yr, _pt_base_yr - 6, -1))
                 # Pre-seed session state so Streamlit uses the correct default
                 _pt_ssn_key = f'pt_season_{_pt_cat}'
                 if _pt_ssn_key not in st.session_state:
                     st.session_state[_pt_ssn_key] = _pt_def_yr
                 _pt_season = st.selectbox(
                     "Season", _pt_yr_list,
-                    key=_pt_ssn_key
+                    key=_pt_ssn_key,
+                    format_func=lambda y, _c=_pt_cat: ESPNWorker._season_label(_c, y)
                 )
             with _pt_c3:
                 st.write("")
@@ -5007,22 +5031,25 @@ def main():
                     _pt3_ssn_key = f'pt3_season_{_pt_cat}'
                     if _pt3_ssn_key not in st.session_state:
                         st.session_state[_pt3_ssn_key] = ESPNWorker._espn_season_year(_pt_cat)
+                    _pt3_base_yr = max(_pt_cur_yr, ESPNWorker._espn_season_year(_pt_cat))
                     _pt3_season = st.selectbox(
-                        "Season", list(range(_pt_cur_yr, _pt_cur_yr - 4, -1)),
-                        key=_pt3_ssn_key
+                        "Season", list(range(_pt3_base_yr, _pt3_base_yr - 5, -1)),
+                        key=_pt3_ssn_key,
+                        format_func=lambda y, _c=_pt_cat: ESPNWorker._season_label(_c, y)
                     )
                 with _pt3_c2:
                     st.write("")
                     _pt3_fetch = st.button("📡 Fetch from ESPN", key="pt3_fetch")
 
                 if _pt3_fetch:
-                    with st.spinner(f"Fetching {_pt_ep} leaders for {_pt3_season}…"):
+                    _pt3_lbl = ESPNWorker._season_label(_pt_cat, _pt3_season)
+                    with st.spinner(f"Fetching {_pt_ep} leaders for {_pt3_lbl}…"):
                         _pt3_data = worker.fetch_league_leaders(_pt_cat, _pt_spt, _pt3_season)
                     if _pt3_data:
                         st.success(f"Fetched! Top-level keys: {list(_pt3_data.keys())}")
                     else:
                         st.warning(
-                            f"ESPN returned no data for {_pt_ep} / {_pt3_season}. "
+                            f"ESPN returned no data for {_pt_ep} / {_pt3_lbl}. "
                             f"Error: {worker.last_error or 'unknown'}"
                         )
                     st.rerun()
@@ -5967,12 +5994,16 @@ def main():
                     )
                 import datetime as _dt2
                 _r5c_cur_yr = _dt2.datetime.now().year
+                _r5c_def_yr = ESPNWorker._espn_season_year(_r5_cat)
+                _r5c_base_yr = max(_r5c_cur_yr, _r5c_def_yr)
                 with _r5c_c2:
                     _r5c_season = st.selectbox(
                         "Season",
-                        list(range(_r5c_cur_yr, _r5c_cur_yr - 5, -1)),
+                        list(range(_r5c_base_yr, _r5c_base_yr - 6, -1)),
                         key="r5c_season",
+                        format_func=lambda y, _c=_r5_cat: ESPNWorker._season_label(_c, y)
                     )
+                _r5c_season_lbl = ESPNWorker._season_label(_r5_cat, _r5c_season)
                 with _r5c_c3:
                     st.write("")
                     if st.button("🔄 Load Schedule", key="r5c_load"):
@@ -5999,7 +6030,7 @@ def main():
                 if _r5c_done.empty:
                     st.info(
                         f"No completed games found for **{_r5c_name}** "
-                        f"({_r5c_season}). Click **🔄 Load Schedule** above."
+                        f"({_r5c_season_lbl}). Click **🔄 Load Schedule** above."
                     )
                 else:
                     _r5c_done = _r5c_done.copy()
