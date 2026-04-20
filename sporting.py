@@ -4228,27 +4228,40 @@ def main():
                         for _d in _dates_sorted:
                             _d_games = _df_rest[_df_rest['event_date'] == _d]
                             _n       = len(_d_games)
-                            _fin     = _d_games['status'].str.contains('FINAL', na=False).sum()
+                            _fin     = int(_d_games['status'].str.contains('FINAL', na=False).sum())
                             _scd     = _n - _fin
 
-                            # Build a short game summary for collapsed header
-                            _matchups = '  ·  '.join(
-                                f"{r['away_team']} vs {r['home_team']}"
-                                for _, r in _d_games.head(3).iterrows()
-                            ) + ('…' if _n > 3 else '')
                             _statbadge = (f"✅ {_fin} final" if _fin == _n
                                           else f"🗓 {_scd} scheduled" if _fin == 0
                                           else f"✅ {_fin}  🗓 {_scd}")
-                            _label = (f"**{_d}**  ·  {_n} game{'s' if _n > 1 else ''}  "
-                                      f"·  {_statbadge}   {_matchups}")
 
-                            # Auto-expand today and the most-recent past date
-                            _auto_open = (_d == _today_str or
-                                          _d == _dates_sorted[0])
-                            with st.expander(_label, expanded=_auto_open):
+                            # Use a toggle button to collapse/expand each date group.
+                            # st.expander cannot be used here because render_game_card
+                            # itself contains st.expander (Streamlit forbids nesting).
+                            _tog_key   = f'sb_date_open_{_d}'
+                            _auto_open = (_d == _today_str or _d == _dates_sorted[0])
+                            if _tog_key not in st.session_state:
+                                st.session_state[_tog_key] = _auto_open
+
+                            _hdr_col, _btn_col = st.columns([8, 1])
+                            with _hdr_col:
+                                st.markdown(
+                                    f"**{_d}** &nbsp; · &nbsp; {_n} game{'s' if _n > 1 else ''}"
+                                    f" &nbsp; · &nbsp; {_statbadge}"
+                                )
+                            with _btn_col:
+                                _lbl_btn = "▲ Hide" if st.session_state[_tog_key] else "▼ Show"
+                                if st.button(_lbl_btn, key=f'sb_tog_{_d}',
+                                             use_container_width=True):
+                                    st.session_state[_tog_key] = not st.session_state[_tog_key]
+                                    st.rerun()
+
+                            if st.session_state[_tog_key]:
                                 for _, _g in _d_games.iterrows():
                                     render_game_card(_g, db=db, worker=worker,
                                                      category=cat, sport=sport)
+
+                            st.divider()
 
     # ── TAB 2: TEAM TRENDS ────────────────────────────────────
     with tab2:
