@@ -3811,6 +3811,14 @@ def main():
         st.session_state.db = SportsDB()
         st.session_state.worker = ESPNWorker(st.session_state.db)
         st.session_state.worker.start()
+    elif not hasattr(st.session_state.get('worker'), 'fetch_league_leaders'):
+        # Worker was cached before fetch_league_leaders was added — recreate it
+        try:
+            st.session_state.worker.running = False
+        except Exception:
+            pass
+        st.session_state.worker = ESPNWorker(st.session_state.db)
+        st.session_state.worker.start()
 
     db: SportsDB = st.session_state.db
     worker: ESPNWorker = st.session_state.worker
@@ -4092,12 +4100,16 @@ def main():
             with _t2c3:
                 import datetime as _dt
                 _cur_yr = _dt.datetime.now().year
-                _t2_yr_list  = list(range(_cur_yr, _cur_yr - 5, -1))
-                _t2_def_yr   = ESPNWorker._espn_season_year(_t2_cat)
-                _t2_yr_idx   = _t2_yr_list.index(_t2_def_yr) if _t2_def_yr in _t2_yr_list else 0
+                _t2_yr_list = list(range(_cur_yr, _cur_yr - 5, -1))
+                _t2_def_yr  = ESPNWorker._espn_season_year(_t2_cat)
+                # Pre-seed session state so Streamlit uses the correct default
+                # (index= is ignored when the key is already in session_state)
+                _t2_ssn_key = f'trend_season_{_t2_cat}'
+                if _t2_ssn_key not in st.session_state:
+                    st.session_state[_t2_ssn_key] = _t2_def_yr
                 _t2_season = st.selectbox(
-                    "Season", _t2_yr_list, index=_t2_yr_idx,
-                    key="trend_season"
+                    "Season", _t2_yr_list,
+                    key=_t2_ssn_key
                 )
 
             with _t2c4:
@@ -4394,12 +4406,15 @@ def main():
             _pt_sport_key    = _pt_ep
 
             with _pt_c2:
-                _pt_yr_list  = list(range(_pt_cur_yr, _pt_cur_yr - 5, -1))
-                _pt_def_yr   = ESPNWorker._espn_season_year(_pt_cat)
-                _pt_yr_idx   = _pt_yr_list.index(_pt_def_yr) if _pt_def_yr in _pt_yr_list else 0
+                _pt_yr_list = list(range(_pt_cur_yr, _pt_cur_yr - 5, -1))
+                _pt_def_yr  = ESPNWorker._espn_season_year(_pt_cat)
+                # Pre-seed session state so Streamlit uses the correct default
+                _pt_ssn_key = f'pt_season_{_pt_cat}'
+                if _pt_ssn_key not in st.session_state:
+                    st.session_state[_pt_ssn_key] = _pt_def_yr
                 _pt_season = st.selectbox(
-                    "Season", _pt_yr_list, index=_pt_yr_idx,
-                    key="pt_season"
+                    "Season", _pt_yr_list,
+                    key=_pt_ssn_key
                 )
             with _pt_c3:
                 st.write("")
@@ -4758,9 +4773,12 @@ def main():
                 )
                 _pt3_c1, _pt3_c2 = st.columns([2, 1])
                 with _pt3_c1:
+                    _pt3_ssn_key = f'pt3_season_{_pt_cat}'
+                    if _pt3_ssn_key not in st.session_state:
+                        st.session_state[_pt3_ssn_key] = ESPNWorker._espn_season_year(_pt_cat)
                     _pt3_season = st.selectbox(
                         "Season", list(range(_pt_cur_yr, _pt_cur_yr - 4, -1)),
-                        key="pt3_season"
+                        key=_pt3_ssn_key
                     )
                 with _pt3_c2:
                     st.write("")
@@ -4779,7 +4797,7 @@ def main():
                     st.rerun()
 
                 _pt3_raw = db.get_cached_data(
-                    f"{_pt_cat}_{_pt_spt}_leaders_{_pt3_season if '_pt3_season' in dir() else _pt_cur_yr}",
+                    f"{_pt_cat}_{_pt_spt}_leaders_{_pt3_season}",
                     86400 * 365
                 )
                 if _pt3_raw:
@@ -4803,7 +4821,7 @@ def main():
                                 st.warning(f"No game log found. Error: {worker.last_error}")
                 else:
                     st.info(
-                        f"No leaders data cached for **{_pt_ep} / {_pt3_season if '_pt3_season' in dir() else _pt_cur_yr}**. "
+                        f"No leaders data cached for **{_pt_ep} / {_pt3_season}**. "
                         f"Click **📡 Fetch from ESPN** above."
                     )
 
