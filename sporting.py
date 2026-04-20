@@ -4571,11 +4571,11 @@ def inject_adsense() -> None:
 
 
 # ── Default admin credentials (SHA-256 hashed) ──────────────────────────────
-# Password : thisisa[assword1!
-# PIN      : 040419
-# These are written to the DB on first run. Change via Admin Panel after login.
-_ADMIN_PW_HASH  = hashlib.sha256('thisisa[assword1!'.encode()).hexdigest()
-_ADMIN_PIN_HASH = hashlib.sha256('040419'.encode()).hexdigest()
+# Default credentials are pre-hashed. The plaintext values are NOT stored here.
+# Change credentials via Admin Panel after first login.
+# To reset: clear 'admin_password' and 'admin_pin' rows from the config table.
+_ADMIN_PW_HASH  = "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
+_ADMIN_PIN_HASH = "ff7faf9dc56f2a51cc8c1e19c05e5f6609f01b89cb4e4e70e5a688d3a13d7cf9"
 
 
 def main():
@@ -7542,7 +7542,7 @@ def main():
     with tab7:
         _render_how_it_works('network')
         if not _render_admin_gate('t6'):
-            st.stop()
+            pass
         else:
             st.subheader("Distributed Fetch Network")
             st.caption(
@@ -8544,133 +8544,133 @@ def main():
                         f"No endpoints registered for **{_cv_sport}**. "
                         "Check EndpointRegistry or crawl this league first."
                     )
-                    st.stop()
-
-                # How many fields have been discovered per endpoint?
-                _cvb_ep_field_counts: Dict[str, int] = {}
-                for _et, _ep_obj in _cvb_ep_labels.items():
-                    _ep_df = db.get_schema_df(sport_key=_cv_sport, endpoint_type=_et)
-                    _cvb_ep_field_counts[_et] = len(_ep_df)
-
-                _cv_data_src = 'espn_live'
-                _cv_ep_type = st.selectbox(
-                    "ESPN Endpoint",
-                    list(_cvb_ep_labels.keys()),
-                    format_func=lambda et: (
-                        f"{et}  ({_cvb_ep_field_counts.get(et, 0):,} fields discovered)"
-                        if _cvb_ep_field_counts.get(et, 0) > 0
-                        else f"{et}  (not yet crawled — crawl first for field hints)"
-                    ),
-                    key='cvb_src_ep',
-                    help=(
-                        "Select which ESPN endpoint to hit live. "
-                        "Endpoints showing field counts have been crawled — "
-                        "their fields load in the picker below. "
-                        "Un-crawled endpoints still work; you'll need to type paths manually."
-                    ),
-                )
-                _cvb_sel_ep   = _cvb_ep_labels[_cv_ep_type]
-                _cvb_live_url    = _cvb_sel_ep['url']
-                _cvb_live_params = _cvb_sel_ep.get('params', {})
-
-                st.caption(f"🌐 `{_cvb_live_url}`" + (f"  `{_cvb_live_params}`" if _cvb_live_params else ""))
-
-                # Field picker — populated from crawled schema if available
-                _cvb_ep_schema_df = db.get_schema_df(sport_key=_cv_sport, endpoint_type=_cv_ep_type)
-                _cvb_all_paths    = _cvb_ep_schema_df['field_path'].tolist() if not _cvb_ep_schema_df.empty else []
-                _cvb_n_paths      = len(_cvb_all_paths)
-
-                if _cvb_n_paths == 0:
-                    st.info(
-                        f"No fields discovered yet for `{_cv_ep_type}`. "
-                        "Click **🕷 Crawl Endpoints** at the top of this tab (set Sport filter to this league), "
-                        "then return here — the field picker will populate automatically."
-                    )
                 else:
-                    st.caption(
-                        f"**{_cvb_n_paths:,} fields available** from crawl of `{_cv_ep_type}`. "
-                        "Search inside the picker or use quick groups below."
+
+                    # How many fields have been discovered per endpoint?
+                    _cvb_ep_field_counts: Dict[str, int] = {}
+                    for _et, _ep_obj in _cvb_ep_labels.items():
+                        _ep_df = db.get_schema_df(sport_key=_cv_sport, endpoint_type=_et)
+                        _cvb_ep_field_counts[_et] = len(_ep_df)
+
+                    _cv_data_src = 'espn_live'
+                    _cv_ep_type = st.selectbox(
+                        "ESPN Endpoint",
+                        list(_cvb_ep_labels.keys()),
+                        format_func=lambda et: (
+                            f"{et}  ({_cvb_ep_field_counts.get(et, 0):,} fields discovered)"
+                            if _cvb_ep_field_counts.get(et, 0) > 0
+                            else f"{et}  (not yet crawled — crawl first for field hints)"
+                        ),
+                        key='cvb_src_ep',
+                        help=(
+                            "Select which ESPN endpoint to hit live. "
+                            "Endpoints showing field counts have been crawled — "
+                            "their fields load in the picker below. "
+                            "Un-crawled endpoints still work; you'll need to type paths manually."
+                        ),
                     )
+                    _cvb_sel_ep   = _cvb_ep_labels[_cv_ep_type]
+                    _cvb_live_url    = _cvb_sel_ep['url']
+                    _cvb_live_params = _cvb_sel_ep.get('params', {})
 
-                # Quick-group checkboxes
-                _cvb_grp_map: Dict[str, List[str]] = {}
-                for _fp in _cvb_all_paths:
-                    _segs = [s.rstrip(']') for s in re.split(r'[.\[]', _fp) if s and not s.rstrip(']').isdigit()]
-                    _grp  = '.'.join(_segs[:3]) or '(root)'
-                    _cvb_grp_map.setdefault(_grp, []).append(_fp)
+                    st.caption(f"🌐 `{_cvb_live_url}`" + (f"  `{_cvb_live_params}`" if _cvb_live_params else ""))
 
-                _cvb_top_groups = sorted(_cvb_grp_map.items(), key=lambda x: (-len(x[1]), x[0]))[:16]
-                _cvb_grp_adds: List[str] = []
-                if _cvb_top_groups:
-                    st.markdown("**Quick-select field groups:**")
-                    _gc_cols = st.columns(min(4, len(_cvb_top_groups)))
-                    for _gi, (_grp, _gpaths) in enumerate(_cvb_top_groups):
-                        with _gc_cols[_gi % 4]:
-                            if st.checkbox(
-                                f"{_grp} ({len(_gpaths)})",
-                                key=f'cvb_grp_{_gi}',
-                                help=f"Add all {len(_gpaths)} fields under `{_grp}`",
-                            ):
-                                _cvb_grp_adds.extend(_gpaths)
-                    _cvb_grp_adds = list(dict.fromkeys(_cvb_grp_adds))
+                    # Field picker — populated from crawled schema if available
+                    _cvb_ep_schema_df = db.get_schema_df(sport_key=_cv_sport, endpoint_type=_cv_ep_type)
+                    _cvb_all_paths    = _cvb_ep_schema_df['field_path'].tolist() if not _cvb_ep_schema_df.empty else []
+                    _cvb_n_paths      = len(_cvb_all_paths)
 
-                _cvb_live_fields = st.multiselect(
-                    f"Fields to extract ({_cvb_n_paths:,} available — type to search)",
-                    options=_cvb_all_paths,
-                    default=[p for p in _cvb_grp_adds if p in _cvb_all_paths][:60],
-                    key='cvb_live_fields',
-                    placeholder="Type any part of a field name…",
-                    help=(
-                        "Each selected path becomes one column in the output. "
-                        "Names are shortened to the last 3 path segments automatically."
-                    ),
-                )
-
-                # Fetch button — loads data into session state for column pickers
-                _cvb_fetch_key = f"cvb_live_df_{_cv_sport}_{_cv_ep_type}"
-                _cvb_fetch_col1, _cvb_fetch_col2 = st.columns([2, 4])
-                with _cvb_fetch_col1:
-                    _do_cvb_fetch = st.button(
-                        f"📡 Fetch ({len(_cvb_live_fields)} fields)",
-                        key='cvb_fetch_btn',
-                        disabled=not bool(_cvb_live_fields),
-                        type='primary',
-                        help="Hits the ESPN endpoint now and populates column pickers below.",
-                    )
-                with _cvb_fetch_col2:
-                    if not _cvb_live_fields:
-                        st.caption("Select at least one field to enable fetch.")
-                    elif _cvb_all_paths:
-                        st.caption(
-                            f"Ready to fetch `{_cv_ep_type}` — "
-                            f"{len(_cvb_live_fields)} columns selected."
+                    if _cvb_n_paths == 0:
+                        st.info(
+                            f"No fields discovered yet for `{_cv_ep_type}`. "
+                            "Click **🕷 Crawl Endpoints** at the top of this tab (set Sport filter to this league), "
+                            "then return here — the field picker will populate automatically."
                         )
-
-                if _do_cvb_fetch:
-                    with st.spinner(f"Fetching {_cvb_live_url}…"):
-                        _fetched_df, _fetch_err = _schema_extract_to_df(
-                            _cvb_live_url, _cvb_live_params, _cvb_live_fields,
-                        )
-                    if _fetch_err:
-                        st.error(f"Fetch error: {_fetch_err}")
-                    elif _fetched_df.empty:
-                        st.warning("Fetch returned 0 rows. Try selecting paths from a shared root array.")
                     else:
-                        st.session_state[_cvb_fetch_key] = _fetched_df
-                        st.success(
-                            f"✅ {len(_fetched_df):,} rows × {len(_fetched_df.columns)} columns. "
-                            "Column pickers updated below."
+                        st.caption(
+                            f"**{_cvb_n_paths:,} fields available** from crawl of `{_cv_ep_type}`. "
+                            "Search inside the picker or use quick groups below."
                         )
 
-                # Use cached fetch result for column pickers
-                _cvb_df = st.session_state.get(_cvb_fetch_key, pd.DataFrame())
-                _cvb_cols    = list(_cvb_df.columns) if not _cvb_df.empty else []
-                _cvb_numcols = [c for c in _cvb_cols if pd.api.types.is_numeric_dtype(_cvb_df[c])]
-                _cvb_ok      = bool(_cvb_cols)
-                _cvb_is_live = True
+                    # Quick-group checkboxes
+                    _cvb_grp_map: Dict[str, List[str]] = {}
+                    for _fp in _cvb_all_paths:
+                        _segs = [s.rstrip(']') for s in re.split(r'[.\[]', _fp) if s and not s.rstrip(']').isdigit()]
+                        _grp  = '.'.join(_segs[:3]) or '(root)'
+                        _cvb_grp_map.setdefault(_grp, []).append(_fp)
 
-                if not _cvb_ok and _cvb_live_fields:
-                    st.info("Click **📡 Fetch** above to load data and populate column pickers.")
+                    _cvb_top_groups = sorted(_cvb_grp_map.items(), key=lambda x: (-len(x[1]), x[0]))[:16]
+                    _cvb_grp_adds: List[str] = []
+                    if _cvb_top_groups:
+                        st.markdown("**Quick-select field groups:**")
+                        _gc_cols = st.columns(min(4, len(_cvb_top_groups)))
+                        for _gi, (_grp, _gpaths) in enumerate(_cvb_top_groups):
+                            with _gc_cols[_gi % 4]:
+                                if st.checkbox(
+                                    f"{_grp} ({len(_gpaths)})",
+                                    key=f'cvb_grp_{_gi}',
+                                    help=f"Add all {len(_gpaths)} fields under `{_grp}`",
+                                ):
+                                    _cvb_grp_adds.extend(_gpaths)
+                        _cvb_grp_adds = list(dict.fromkeys(_cvb_grp_adds))
+
+                    _cvb_live_fields = st.multiselect(
+                        f"Fields to extract ({_cvb_n_paths:,} available — type to search)",
+                        options=_cvb_all_paths,
+                        default=[p for p in _cvb_grp_adds if p in _cvb_all_paths][:60],
+                        key='cvb_live_fields',
+                        placeholder="Type any part of a field name…",
+                        help=(
+                            "Each selected path becomes one column in the output. "
+                            "Names are shortened to the last 3 path segments automatically."
+                        ),
+                    )
+
+                    # Fetch button — loads data into session state for column pickers
+                    _cvb_fetch_key = f"cvb_live_df_{_cv_sport}_{_cv_ep_type}"
+                    _cvb_fetch_col1, _cvb_fetch_col2 = st.columns([2, 4])
+                    with _cvb_fetch_col1:
+                        _do_cvb_fetch = st.button(
+                            f"📡 Fetch ({len(_cvb_live_fields)} fields)",
+                            key='cvb_fetch_btn',
+                            disabled=not bool(_cvb_live_fields),
+                            type='primary',
+                            help="Hits the ESPN endpoint now and populates column pickers below.",
+                        )
+                    with _cvb_fetch_col2:
+                        if not _cvb_live_fields:
+                            st.caption("Select at least one field to enable fetch.")
+                        elif _cvb_all_paths:
+                            st.caption(
+                                f"Ready to fetch `{_cv_ep_type}` — "
+                                f"{len(_cvb_live_fields)} columns selected."
+                            )
+
+                    if _do_cvb_fetch:
+                        with st.spinner(f"Fetching {_cvb_live_url}…"):
+                            _fetched_df, _fetch_err = _schema_extract_to_df(
+                                _cvb_live_url, _cvb_live_params, _cvb_live_fields,
+                            )
+                        if _fetch_err:
+                            st.error(f"Fetch error: {_fetch_err}")
+                        elif _fetched_df.empty:
+                            st.warning("Fetch returned 0 rows. Try selecting paths from a shared root array.")
+                        else:
+                            st.session_state[_cvb_fetch_key] = _fetched_df
+                            st.success(
+                                f"✅ {len(_fetched_df):,} rows × {len(_fetched_df.columns)} columns. "
+                                "Column pickers updated below."
+                            )
+
+                    # Use cached fetch result for column pickers
+                    _cvb_df = st.session_state.get(_cvb_fetch_key, pd.DataFrame())
+                    _cvb_cols    = list(_cvb_df.columns) if not _cvb_df.empty else []
+                    _cvb_numcols = [c for c in _cvb_cols if pd.api.types.is_numeric_dtype(_cvb_df[c])]
+                    _cvb_ok      = bool(_cvb_cols)
+                    _cvb_is_live = True
+
+                    if not _cvb_ok and _cvb_live_fields:
+                        st.info("Click **📡 Fetch** above to load data and populate column pickers.")
 
             # ════════════════════════════════════════════════════════
             # SHARED — chart type + column pickers + filter + preview
@@ -8851,7 +8851,7 @@ def main():
     # ── TAB 9: RAW INSPECTOR ───────────────────────────────
     with tab9:
         if not _render_admin_gate('t8'):
-            st.stop()
+            pass
         else:
             st.subheader("Raw JSON Inspector")
             st.caption("Explore the full JSON structure returned by ESPN for any endpoint.")
@@ -9016,7 +9016,7 @@ def main():
         )
 
         if not _render_admin_gate('t10'):
-            st.stop()
+            pass
         else:
             st.success("✅ Logged in as Admin")
             if st.button("🔒 Log out", key='admin_logout'):
