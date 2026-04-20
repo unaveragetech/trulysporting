@@ -1033,6 +1033,25 @@ class SportsDB:
             UNIQUE(sport_key, team_id, player_id)
         )''')
 
+        # Per-player per-game stats flattened from game summary boxscores
+        c.execute('''CREATE TABLE IF NOT EXISTS player_game_stats (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id     TEXT NOT NULL,
+            game_date    TEXT,
+            sport_key    TEXT NOT NULL,
+            team_abbr    TEXT,
+            player_id    TEXT,
+            player_name  TEXT,
+            headshot_url TEXT,
+            category     TEXT,
+            stat_labels  TEXT,
+            stat_values  TEXT,
+            fetched_at   TEXT,
+            UNIQUE(event_id, player_id, category)
+        )''')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_pgs_sport_player ON player_game_stats(sport_key, player_name)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_pgs_event ON player_game_stats(event_id)')
+
         # Migrations: safely add new columns to existing tables
         _migrations = [
             "ALTER TABLE game_history ADD COLUMN neutral_site INTEGER DEFAULT 0",
@@ -1053,6 +1072,7 @@ class SportsDB:
             "ALTER TABLE roster ADD COLUMN position_name TEXT DEFAULT ''",
             "ALTER TABLE roster ADD COLUMN status_name TEXT DEFAULT 'Active'",
             "ALTER TABLE roster ADD COLUMN player_slug TEXT DEFAULT ''",
+            "ALTER TABLE player_game_stats ADD COLUMN game_date TEXT DEFAULT ''",
         ]
         for _m in _migrations:
             try:
@@ -1538,8 +1558,110 @@ class SportsDB:
             summary.get('away_abbr', ''),
             summary['fetched_at'],
         ))
+        # Also flatten player_stats_json → player_game_stats for the Player Trends tab
+        try:
+            _ps = json.loads(summary.get('player_stats_json', '[]') or '[]')
+            if _ps:
+                # Look up the game_date from game_history
+                _conn2 = self.get_connection()
+                _row2 = _conn2.execute(
+                    "SELECT event_date FROM game_history WHERE event_id=?",
+                    (summary['event_id'],)
+                ).fetchone()
+                _gd = _row2[0] if _row2 else ''
+                _conn2.close()
+                self._flatten_player_stats(
+                    summary['event_id'], summary['sport_key'], _gd, _ps
+                )
+        except Exception:
+            pass
         conn.commit()
         conn.close()
+
+    def _flatten_player_stats(self, event_id: str, sport_key: str,
+                               game_date: str, player_stats: list):
+        """Flatten player_stats_json list into player_game_stats rows."""
+        conn = self.get_connection()
+        c = conn.cursor()
+        now = datetime.now().isoformat()
+        rows = []
+        for cat_block in player_stats:
+            cat_name   = cat_block.get('category', cat_block.get('displayName', ''))
+            labels     = cat_block.get('labels', [])
+            team_abbr  = cat_block.get('team', '')
+            for ath in cat_block.get('athletes', []):
+                pid  = str(ath.get('id', ''))
+                name = ath.get('name', '')
+                hs   = ath.get('headshot', '')
+                vals = ath.get('stats', [])
+                if not name:
+                    continue
+                rows.append((
+                    event_id, game_date, sport_key, team_abbr,
+                    pid, name, hs,
+                    cat_name,
+                    json.dumps(labels),
+                    json.dumps(vals),
+                    now,
+                ))
+        if rows:
+            c.executemany("""
+                INSERT OR IGNORE INTO player_game_stats
+                (event_id, game_date, sport_key, team_abbr, player_id,
+                 player_name, headshot_url, category, stat_labels, stat_values, fetched_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """, rows)
+            conn.commit()
+        conn.close()
+
+    def get_player_game_log(self, sport_key: str, player_name: str) -> pd.DataFrame:
+        """Return per-game stat rows for a named player in a sport."""
+        conn = self.get_connection()
+        df = pd.read_sql_query("""
+            SELECT p.event_id, p.game_date, p.team_abbr, p.player_name,
+                   p.category, p.stat_labels, p.stat_values, p.headshot_url,
+                   h.home_team, h.away_team, h.home_score, h.away_score, h.status
+            FROM player_game_stats p
+            LEFT JOIN game_history h ON h.event_id = p.event_id
+            WHERE p.sport_key=? AND LOWER(p.player_name) LIKE ?
+            ORDER BY p.game_date DESC
+        """, conn, params=(sport_key, f'%{player_name.lower()}%'))
+        conn.close()
+        return df
+
+    def get_sport_player_names(self, sport_key: str) -> list:
+        """Distinct player names stored for a sport (for autocomplete)."""
+        conn = self.get_connection()
+        rows = conn.execute(
+            "SELECT DISTINCT player_name FROM player_game_stats WHERE sport_key=? ORDER BY player_name",
+            (sport_key,)
+        ).fetchall()
+        conn.close()
+        return [r[0] for r in rows]
+
+    def get_category_leaders(self, sport_key: str, category: str,
+                             stat_idx: int = 0, limit: int = 25) -> pd.DataFrame:
+        """Return top players for a stat category from stored game-level data."""
+        conn = self.get_connection()
+        df = pd.read_sql_query("""
+            SELECT player_name, team_abbr, headshot_url, COUNT(*) as games,
+                   stat_labels, stat_values, game_date
+            FROM player_game_stats
+            WHERE sport_key=? AND category=?
+            ORDER BY game_date DESC
+        """, conn, params=(sport_key, category))
+        conn.close()
+        return df
+
+    def get_available_categories(self, sport_key: str) -> list:
+        """Distinct stat categories stored for a sport."""
+        conn = self.get_connection()
+        rows = conn.execute(
+            "SELECT DISTINCT category FROM player_game_stats WHERE sport_key=? ORDER BY category",
+            (sport_key,)
+        ).fetchall()
+        conn.close()
+        return [r[0] for r in rows]
 
     def save_team_roster(self, sport_key: str, team_id: str, team_abbr: str,
                          position_groups: List[Dict]):
@@ -1978,6 +2100,52 @@ class ESPNWorker:
             self.last_error = str(e)
             return None
 
+    def fetch_league_leaders(self, category: str, sport: str,
+                              season: Optional[int] = None) -> Optional[Dict]:
+        """Fetch league statistical leaders for the current/specified season.
+        Uses ESPN's /athletes/statistics endpoint which returns per-category
+        top performers (scoring, rebounds, assists, ERA, etc.)."""
+        import datetime as _dt
+        yr = season or _dt.datetime.now().year
+        cache_key = f"{category}_{sport}_leaders_{yr}"
+        cached = self.db.get_cached_data(cache_key, 3600)
+        if cached:
+            return cached
+        # ESPN stats leaders endpoint — works for NBA/NHL/MLB/NFL/soccer
+        url = f"{EndpointRegistry.BASE_URL}/{category}/{sport}/athletes/statistics"
+        try:
+            resp = self.session.get(url, params={'season': yr, 'limit': 50}, timeout=20)
+            resp.raise_for_status()
+            data = resp.json()
+            self.db.save_to_cache(cache_key, data)
+            self.last_error = ''
+            return data
+        except Exception as e:
+            self.last_error = str(e)
+            return None
+
+    def fetch_athlete_gamelog(self, category: str, sport: str,
+                               athlete_id: str, season: Optional[int] = None) -> Optional[Dict]:
+        """Fetch a single athlete's game-by-game log for the season.
+        Uses ESPN's /athletes/{id}/gamelog endpoint."""
+        import datetime as _dt
+        yr = season or _dt.datetime.now().year
+        cache_key = f"{category}_{sport}_gamelog_{athlete_id}_{yr}"
+        cached = self.db.get_cached_data(cache_key, 3600)
+        if cached:
+            return cached
+        url = f"{EndpointRegistry.BASE_URL}/{category}/{sport}/athletes/{athlete_id}/gamelog"
+        try:
+            resp = self.session.get(url, params={'season': yr}, timeout=20)
+            resp.raise_for_status()
+            data = resp.json()
+            self.db.save_to_cache(cache_key, data)
+            self.last_error = ''
+            return data
+        except Exception as e:
+            self.last_error = str(e)
+            return None
+
     def fetch_game_summary(self, category: str, sport: str, event_id: str) -> Optional[Dict]:
         """Fetch box score / summary for a completed game."""
         sport_key = f'{category}/{sport}'
@@ -2030,6 +2198,7 @@ class ESPNWorker:
         self.thread.start()
 
     def _loop(self):
+        import datetime as _dt
         while self.running:
             try:
                 active_eps = json.loads(self.db.get_config('active_endpoints', '[]'))
@@ -2047,8 +2216,18 @@ class ESPNWorker:
                     if EndpointRegistry.get_url(cat, sport, 'rankings'):
                         self.fetch_and_process(cat, sport, 'rankings')
                         time.sleep(2)
+                    # League leaders / player stats (best-effort, non-blocking)
+                    try:
+                        self.fetch_league_leaders(cat, sport, _dt.datetime.now().year)
+                    except Exception:
+                        pass
+                    time.sleep(2)
 
                 time.sleep(int(self.db.get_config('default_refresh_interval', 3600)))
+            except Exception as e:
+                self.last_error = str(e)
+                print(f"Worker Error: {e}")
+                time.sleep(60)
             except Exception as e:
                 self.last_error = str(e)
                 print(f"Worker Error: {e}")
@@ -3705,9 +3884,10 @@ def main():
             st.rerun()
 
     # ── TABS ──────────────────────────────────────────────────
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs([
         "🏅 Scoreboard",
         "📈 Team Trends",
+        "👤 Player Trends",
         "🏟 Teams",
         "📰 News",
         "🏆 Rankings",
@@ -3746,11 +3926,17 @@ def main():
                 date_str = sel_date.strftime('%Y%m%d')
                 with st.spinner("Fetching scores…"):
                     worker.fetch_date_scoreboard(cat, sport, date_str)
+                st.rerun()
 
             if fetch_latest_btn:
                 # Fetch undated — ESPN returns the current/most-recent week
                 with st.spinner("Fetching most recent games…"):
                     worker.fetch_and_process(cat, sport, 'scoreboard', force_refresh=True)
+                    # Also fetch today's date explicitly to fill the date picker
+                    import datetime as _dt2
+                    _today_str = _dt2.datetime.now().strftime('%Y%m%d')
+                    worker.fetch_date_scoreboard(cat, sport, _today_str)
+                st.rerun()
 
             df_games = db.get_games_df(cat, sport, sel_date.isoformat())
             fallback_used = False
@@ -3764,7 +3950,8 @@ def main():
                     st.info(
                         f"📌 No games on **{sel_date}** for {sel_ep}. "
                         f"Showing most recent stored games (latest: **{latest_date}**). "
-                        f"Click **Latest Available** to pull the current week from ESPN."
+                        f"Click **Latest Available** to pull the current week from ESPN, "
+                        f"or click **Fetch Date** to search ESPN for the selected date."
                     )
                 else:
                     st.info(
@@ -4128,8 +4315,334 @@ def main():
                                 use_container_width=True, hide_index=True,
                             )
 
-    # ── TAB 3: TEAMS ──────────────────────────────────────────
+    # ── TAB 3: PLAYER TRENDS ──────────────────────────────────
     with tab3:
+        import datetime as _dt3
+        _pt_cur_yr = _dt3.datetime.now().year
+
+        _pt_active_eps = json.loads(db.get_config('active_endpoints', '[]'))
+        _pt_hdr_ep = _pt_active_eps[0] if _pt_active_eps else ''
+        _render_tab_banner("Player Trends",
+                           "Per-game stats · Season leaders · Player game logs", _pt_hdr_ep)
+
+        if not _pt_active_eps:
+            st.info("Add leagues in the sidebar first.")
+        else:
+            _pt_c1, _pt_c2, _pt_c3 = st.columns([3, 2, 1])
+            with _pt_c1:
+                _pt_ep = st.selectbox("League", _pt_active_eps, key="pt_ep")
+            _pt_cat, _pt_spt = _pt_ep.split('/')
+            _pt_sport_key    = _pt_ep
+
+            with _pt_c2:
+                _pt_season = st.selectbox(
+                    "Season", list(range(_pt_cur_yr, _pt_cur_yr - 5, -1)),
+                    key="pt_season"
+                )
+            with _pt_c3:
+                st.write("")
+                _pt_fetch_ldrs = st.button("🔄 Load Leaders", key="pt_fetch_ldrs",
+                                           help="Fetch ESPN season leaders for this sport")
+
+            if _pt_fetch_ldrs:
+                with st.spinner("Fetching league leaders from ESPN…"):
+                    worker.fetch_league_leaders(_pt_cat, _pt_spt, _pt_season)
+                st.rerun()
+
+            # ── Sub-tabs ────────────────────────────────────────
+            _pt_sub1, _pt_sub2, _pt_sub3 = st.tabs([
+                "📊 Season Leaders",
+                "🔍 Player Search",
+                "📈 ESPN Stats Feed",
+            ])
+
+            # ─────────────────────────────────────────────────────
+            # SUB-TAB 1: SEASON LEADERS (from ESPN leaders API + stored game stats)
+            # ─────────────────────────────────────────────────────
+            with _pt_sub1:
+                st.caption(
+                    "Leaders pulled from ESPN's `/athletes/statistics` endpoint "
+                    "and from per-game boxscores already stored in this session."
+                )
+
+                # Try ESPN leaders cache first
+                _ldrs_cache_key = f"{_pt_cat}_{_pt_spt}_leaders_{_pt_season}"
+                _ldrs_raw = db.get_cached_data(_ldrs_cache_key, 86400 * 365)
+
+                if _ldrs_raw:
+                    # ESPN returns leaders in categories[]
+                    _ldrs_cats = _ldrs_raw.get('categories', [])
+                    if not _ldrs_cats:
+                        # Some sports use a different root key
+                        _ldrs_cats = _ldrs_raw.get('leaders', [])
+
+                    if _ldrs_cats:
+                        # Per-category expander
+                        for _lc in _ldrs_cats:
+                            _lc_name = _lc.get('displayName', _lc.get('name', 'Stat'))
+                            _lc_leaders = _lc.get('leaders', [])
+                            if not _lc_leaders:
+                                continue
+                            with st.expander(f"**{_lc_name}**", expanded=False):
+                                _ldr_rows = []
+                                for _rank, _ldr in enumerate(_lc_leaders[:25], 1):
+                                    _ath = _ldr.get('athlete', {})
+                                    _tm  = (_ldr.get('team') or {}).get('abbreviation', '')
+                                    _hs  = (_ath.get('headshot') or {}).get('href', ''
+                                            ) if isinstance(_ath.get('headshot'), dict
+                                            ) else _ath.get('headshot', '')
+                                    _ldr_rows.append({
+                                        'Rank':    _rank,
+                                        'Player':  _ath.get('displayName', '—'),
+                                        'Team':    _tm,
+                                        'Value':   _ldr.get('displayValue', ''),
+                                    })
+                                if _ldr_rows:
+                                    import pandas as _pd3
+                                    st.dataframe(
+                                        _pd3.DataFrame(_ldr_rows),
+                                        use_container_width=True, hide_index=True,
+                                    )
+                    else:
+                        st.info("ESPN returned data but no leaders categories were found for this sport/season.")
+                        if st.checkbox("Show raw ESPN response", key="pt_raw_ldr"):
+                            st.json(_ldrs_raw)
+                else:
+                    # Fall back to locally stored player_game_stats
+                    _pt_cats_stored = db.get_available_categories(_pt_sport_key)
+                    if _pt_cats_stored:
+                        st.info(
+                            f"No ESPN leaders data cached yet for {_pt_ep} / {_pt_season}. "
+                            f"Showing leaders built from {len(_pt_cats_stored)} stored boxscore stat categories."
+                        )
+                        _sel_cat = st.selectbox("Stat Category", _pt_cats_stored, key="pt_cat_sel")
+                        _cat_df  = db.get_category_leaders(_pt_sport_key, _sel_cat)
+                        if not _cat_df.empty:
+                            # Parse labels + values to find the best single stat column
+                            import json as _jpt
+                            try:
+                                _labels_ex = _jpt.loads(_cat_df.iloc[0]['stat_labels'])
+                            except Exception:
+                                _labels_ex = []
+
+                            if _labels_ex:
+                                _pick_stat = st.selectbox(
+                                    "Sort by stat", _labels_ex, key="pt_stat_pick"
+                                )
+                                _stat_idx  = _labels_ex.index(_pick_stat)
+                                def _extract_val(row_vals, idx):
+                                    try:
+                                        vals = _jpt.loads(row_vals)
+                                        v = vals[idx]
+                                        return float(str(v).replace(',', '')) if str(v).replace('.', '').replace('-', '').isdigit() else str(v)
+                                    except Exception:
+                                        return ''
+                                _cat_df2 = _cat_df.copy()
+                                _cat_df2['stat_val'] = _cat_df2['stat_values'].apply(
+                                    lambda v: _extract_val(v, _stat_idx))
+                                # Build numeric for sorting
+                                _cat_df2['_sort'] = _cat_df2['stat_val'].apply(
+                                    lambda v: float(v) if isinstance(v, float) else 0.0)
+                                _cat_df2 = _cat_df2.sort_values('_sort', ascending=False).head(30)
+                                _disp_cols = ['player_name', 'team_abbr', 'stat_val']
+                                _disp = _cat_df2[_disp_cols].rename(columns={
+                                    'player_name': 'Player', 'team_abbr': 'Team',
+                                    'stat_val': _pick_stat,
+                                })
+                                st.dataframe(_disp, use_container_width=True, hide_index=True)
+                            else:
+                                st.dataframe(
+                                    _cat_df[['player_name', 'team_abbr', 'games']].rename(
+                                        columns={'player_name': 'Player', 'team_abbr': 'Team',
+                                                 'games': 'Games'}),
+                                    use_container_width=True, hide_index=True,
+                                )
+                    else:
+                        st.info(
+                            f"No player data yet for **{_pt_ep}**. "
+                            f"1) Fetch game scores on the Scoreboard tab. "
+                            f"2) Click **Fetch Summary** on individual game cards to load boxscores. "
+                            f"3) Click **🔄 Load Leaders** above to pull ESPN season leaders directly."
+                        )
+
+            # ─────────────────────────────────────────────────────
+            # SUB-TAB 2: PLAYER SEARCH (game-by-game log)
+            # ─────────────────────────────────────────────────────
+            with _pt_sub2:
+                _pt_names = db.get_sport_player_names(_pt_sport_key)
+
+                _ps_c1, _ps_c2 = st.columns([3, 1])
+                with _ps_c1:
+                    _pt_search = st.text_input(
+                        "Player name", placeholder="e.g. LeBron James, Shohei Ohtani",
+                        key="pt_player_search"
+                    )
+                with _ps_c2:
+                    if _pt_names:
+                        st.caption(f"{len(_pt_names)} players in DB")
+
+                if _pt_search and len(_pt_search) >= 2:
+                    _pt_log = db.get_player_game_log(_pt_sport_key, _pt_search)
+                    if _pt_log.empty:
+                        st.info(
+                            f"No stored game stats for **\"{_pt_search}\"** in {_pt_ep}. "
+                            f"Make sure game summaries have been fetched for this league/player."
+                        )
+                    else:
+                        _pt_player_name = _pt_log.iloc[0]['player_name']
+                        _pt_hs_url = _pt_log.iloc[0]['headshot_url']
+                        _ph1, _ph2 = st.columns([1, 6])
+                        with _ph1:
+                            if _pt_hs_url:
+                                st.image(_pt_hs_url, width=80)
+                        with _ph2:
+                            st.markdown(f"### {_pt_player_name}")
+                            st.caption(f"{_pt_ep}  ·  {len(_pt_log)} games with stats")
+
+                        # Pick a category
+                        _pt_log_cats = sorted(_pt_log['category'].unique().tolist())
+                        _pt_sel_log_cat = st.selectbox(
+                            "Stat category", _pt_log_cats, key="pt_log_cat"
+                        )
+                        _pt_log_f = _pt_log[_pt_log['category'] == _pt_sel_log_cat].copy()
+
+                        try:
+                            import json as _jptl
+                            _labels_log = _jptl.loads(_pt_log_f.iloc[0]['stat_labels'])
+                            _pt_log_f['_vals_list'] = _pt_log_f['stat_values'].apply(
+                                lambda x: _jptl.loads(x) if x else [])
+                            for _li, _lbl in enumerate(_labels_log):
+                                _pt_log_f[_lbl] = _pt_log_f['_vals_list'].apply(
+                                    lambda v: v[_li] if _li < len(v) else '')
+
+                            _disp_log_cols = ['game_date', 'team_abbr'] + _labels_log[:8]
+                            _pt_log_disp = _pt_log_f[[c for c in _disp_log_cols
+                                                       if c in _pt_log_f.columns]].copy()
+                            _pt_log_disp = _pt_log_disp.sort_values('game_date', ascending=False)
+                            _pt_log_disp.columns = [c.replace('game_date', 'Date'
+                                                               ).replace('team_abbr', 'Team')
+                                                     for c in _pt_log_disp.columns]
+                            st.dataframe(_pt_log_disp, use_container_width=True, hide_index=True)
+
+                            # Trend chart for first numeric stat
+                            _num_lbl = next(
+                                (l for l in _labels_log
+                                 if _pt_log_f[l].apply(
+                                     lambda v: str(v).replace('.', '').lstrip('-').isdigit()
+                                 ).any()),
+                                None
+                            )
+                            if _num_lbl and len(_pt_log_f) >= 3:
+                                _pt_log_f['_y'] = _pt_log_f[_num_lbl].apply(
+                                    lambda v: float(str(v).replace(',', ''))
+                                              if str(v).lstrip('-').replace('.', '').isdigit()
+                                              else None
+                                )
+                                _pt_log_plot = _pt_log_f.dropna(subset=['_y']).sort_values('game_date')
+                                if len(_pt_log_plot) >= 2:
+                                    import plotly.graph_objects as _go3
+                                    _fig_pt = _go3.Figure()
+                                    _fig_pt.add_trace(_go3.Scatter(
+                                        x=_pt_log_plot['game_date'],
+                                        y=_pt_log_plot['_y'],
+                                        mode='lines+markers',
+                                        name=_num_lbl,
+                                        line=dict(color='#1a73e8', width=2),
+                                        marker=dict(size=7),
+                                    ))
+                                    _roll_y = _pt_log_plot['_y'].rolling(3, min_periods=1).mean()
+                                    _fig_pt.add_trace(_go3.Scatter(
+                                        x=_pt_log_plot['game_date'],
+                                        y=_roll_y,
+                                        mode='lines',
+                                        name='3-game avg',
+                                        line=dict(color='#f4a261', width=2, dash='dot'),
+                                    ))
+                                    _fig_pt.update_layout(
+                                        title=f"{_pt_player_name} — {_num_lbl} trend",
+                                        height=300,
+                                        plot_bgcolor='#f9f9f9',
+                                        margin=dict(t=40, b=30, l=30, r=10),
+                                        legend=dict(orientation='h', y=-0.25),
+                                    )
+                                    st.plotly_chart(_fig_pt, use_container_width=True)
+                        except Exception as _epl:
+                            st.dataframe(_pt_log_f[['game_date', 'team_abbr',
+                                                     'stat_labels', 'stat_values']],
+                                         use_container_width=True, hide_index=True)
+
+                elif _pt_names:
+                    st.caption(
+                        "Start typing a player name above. "
+                        f"Players stored locally: {', '.join(_pt_names[:10])}"
+                        + ('…' if len(_pt_names) > 10 else '')
+                    )
+                else:
+                    st.info(
+                        "No player data stored yet. Fetch game summaries from the Scoreboard tab first."
+                    )
+
+            # ─────────────────────────────────────────────────────
+            # SUB-TAB 3: ESPN STATS FEED (raw leaders from ESPN API)
+            # ─────────────────────────────────────────────────────
+            with _pt_sub3:
+                st.caption(
+                    "Pulls & displays the raw ESPN statistical leaders API response. "
+                    "Useful for discovering all available stats for a sport."
+                )
+                _pt3_c1, _pt3_c2 = st.columns([2, 1])
+                with _pt3_c1:
+                    _pt3_season = st.selectbox(
+                        "Season", list(range(_pt_cur_yr, _pt_cur_yr - 4, -1)),
+                        key="pt3_season"
+                    )
+                with _pt3_c2:
+                    st.write("")
+                    _pt3_fetch = st.button("📡 Fetch from ESPN", key="pt3_fetch")
+
+                if _pt3_fetch:
+                    with st.spinner(f"Fetching {_pt_ep} leaders for {_pt3_season}…"):
+                        _pt3_data = worker.fetch_league_leaders(_pt_cat, _pt_spt, _pt3_season)
+                    if _pt3_data:
+                        st.success(f"Fetched! Top-level keys: {list(_pt3_data.keys())}")
+                    else:
+                        st.warning(
+                            f"ESPN returned no data for {_pt_ep} / {_pt3_season}. "
+                            f"Error: {worker.last_error or 'unknown'}"
+                        )
+                    st.rerun()
+
+                _pt3_raw = db.get_cached_data(
+                    f"{_pt_cat}_{_pt_spt}_leaders_{_pt3_season if '_pt3_season' in dir() else _pt_cur_yr}",
+                    86400 * 365
+                )
+                if _pt3_raw:
+                    st.json(_pt3_raw, expanded=False)
+                    # Also expose as athlete gamelog
+                    with st.expander("🔬 Individual Athlete Game Log", expanded=False):
+                        _pt3_ath_id = st.text_input(
+                            "ESPN Athlete ID",
+                            placeholder="e.g. 1966 (LeBron), 33912 (Ohtani)",
+                            key="pt3_ath_id"
+                        )
+                        _pt3_fetch_gl = st.button("Fetch Game Log", key="pt3_fetch_gl")
+                        if _pt3_ath_id and _pt3_fetch_gl:
+                            with st.spinner("Fetching athlete game log…"):
+                                _pt3_gl = worker.fetch_athlete_gamelog(
+                                    _pt_cat, _pt_spt, _pt3_ath_id, _pt3_season
+                                )
+                            if _pt3_gl:
+                                st.json(_pt3_gl, expanded=False)
+                            else:
+                                st.warning(f"No game log found. Error: {worker.last_error}")
+                else:
+                    st.info(
+                        f"No leaders data cached for **{_pt_ep} / {_pt3_season if '_pt3_season' in dir() else _pt_cur_yr}**. "
+                        f"Click **📡 Fetch from ESPN** above."
+                    )
+
+    # ── TAB 4: TEAMS ──────────────────────────────────────────
+    with tab4:
         st.subheader("Teams")
         active_eps = json.loads(db.get_config('active_endpoints', '[]'))
 
@@ -4473,8 +4986,8 @@ def main():
                                             df_roster3[
                                                 df_roster3['position_group'] == active_grps3[0]])
 
-    # ── TAB 4: NEWS ───────────────────────────────────────────
-    with tab4:
+    # ── TAB 5: NEWS ───────────────────────────────────────────
+    with tab5:
         st.subheader("Latest News")
         active_eps = json.loads(db.get_config('active_endpoints', '[]'))
 
@@ -4559,8 +5072,8 @@ def main():
                                 pass
                         st.divider()
 
-    # ── TAB 5: RANKINGS & STANDINGS ──────────────────────────
-    with tab5:
+    # ── TAB 6: RANKINGS & STANDINGS ──────────────────────────
+    with tab6:
         st.subheader("🏆 Rankings & Standings")
         _r5_all_eps = json.loads(db.get_config('active_endpoints', '[]'))
 
@@ -5440,10 +5953,8 @@ def main():
                     ))
                     st.plotly_chart(_rl_fig, use_container_width=True)
 
-    # ── TAB 6: NETWORK / COORDINATOR ─────────────────────────
-
-    # ── TAB 6: NETWORK / COORDINATOR ─────────────────────────
-    with tab6:
+    # ── TAB 7: NETWORK / COORDINATOR ─────────────────────────
+    with tab7:
         _auth_t6 = st.session_state.get('admin_authed', False)
         _pin_t6  = db.get_config('admin_pin', '')
         if not _auth_t6:
@@ -5591,7 +6102,7 @@ def main():
                     st.markdown("**Local DB job queue state:**")
                     st.json(job_stats)
 
-    # ── Custom-view helpers (shared by TAB 7 builder & TAB 9 runner) ─────────
+    # ── Custom-view helpers (shared by TAB 8 builder & TAB 10 runner) ─────────
     def _cvb_load_df(sport_key: str, data_src: str) -> pd.DataFrame:
         """Pull stored data from DB — no live ESPN fetch."""
         try:
@@ -5684,8 +6195,8 @@ def main():
                 _label = str(_mr[_cx]) if _mr[_cx] is not None else '—'
                 _mc_cs[_mci].metric(_label, _mv)
 
-    # ── TAB 7: SCHEMA EXPLORER ────────────────────────────────
-    with tab7:
+    # ── TAB 8: SCHEMA EXPLORER ────────────────────────────────
+    with tab8:
         st.subheader("Field Schema Explorer")
         st.caption(
             "Crawls every ESPN endpoint and discovers ALL available JSON fields — "
@@ -6045,8 +6556,8 @@ def main():
                         st.success(f"✅ Saved to `{_cv_path}`")
                         st.rerun()
 
-    # ── TAB 8: RAW INSPECTOR ───────────────────────────────
-    with tab8:
+    # ── TAB 9: RAW INSPECTOR ───────────────────────────────
+    with tab9:
         _auth_t8 = st.session_state.get('admin_authed', False)
         _pin_t8  = db.get_config('admin_pin', '')
         if not _auth_t8:
@@ -6136,8 +6647,8 @@ def main():
                 else:
                     st.error(f"Failed to fetch. Error: {worker.last_error}")
 
-    # ── TAB 9: CUSTOM VIEWS ────────────────────────────────────
-    with tab9:
+    # ── TAB 10: CUSTOM VIEWS ────────────────────────────────────
+    with tab10:
         st.subheader("📋 Custom Views")
         st.caption(
             "Run saved views from this session, from disk, or downloaded from the Admin Panel. "
@@ -6235,8 +6746,8 @@ def main():
                     with _vcc1:
                         _cv_run_view(_vcfg)
 
-    # ── TAB 10: ADMIN PANEL ───────────────────────────────────
-    with tab10:
+    # ── TAB 11: ADMIN PANEL ───────────────────────────────────
+    with tab11:
         st.subheader("🛠 Admin Panel")
         st.caption(
             "Upload custom view files to make them available to all users. "
@@ -6527,8 +7038,8 @@ def main():
                                 st.success(f"Deleted {_cvf10}")
                                 st.rerun()
 
-    # ── TAB 11: SUPPORT / DONATE ───────────────────────────────
-    with tab11:
+    # ── TAB 12: SUPPORT / DONATE ───────────────────────────────
+    with tab12:
         _render_donation_page()
 
 
