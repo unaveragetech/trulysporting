@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="TrulySporting Analytics — full project commit history.">
+  <meta name="google-adsense-account" content="ca-pub-8003312242019311">
+  <script async
+    src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8003312242019311"
+    crossorigin="anonymous"></script>
+
+  <title>Commit History · TrulySporting Analytics</title>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg0:    #0d1b2a;
+      --bg1:    #1a2e45;
+      --bg2:    rgba(255,255,255,0.05);
+      --border: rgba(255,255,255,0.10);
+      --text:   #f3f4f6;
+      --muted:  #9ca3af;
+      --dim:    #4b5563;
+      --gold:   #f59e0b;
+      --red:    #ef4444;
+      --blue:   #3b82f6;
+      --green:  #22c55e;
+      --line:   rgba(255,255,255,0.08);
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+      background: linear-gradient(135deg, var(--bg0) 0%, var(--bg1) 50%, var(--bg0) 100%);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 2rem 1rem 4rem;
+    }
+
+    /* ── TOP NAV ── */
+    .topbar {
+      max-width: 860px;
+      margin: 0 auto 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .back-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 50px;
+      padding: 0.5rem 1.2rem;
+      color: var(--muted);
+      font-size: 0.88rem;
+      text-decoration: none;
+      transition: background 0.2s, color 0.2s;
+      backdrop-filter: blur(6px);
+    }
+    .back-btn:hover { background: rgba(255,255,255,0.10); color: var(--text); }
+
+    .page-title {
+      font-size: 1.6rem;
+      font-weight: 800;
+      background: linear-gradient(90deg, var(--gold), var(--red), var(--blue));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .gh-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 50px;
+      padding: 0.5rem 1.2rem;
+      color: var(--muted);
+      font-size: 0.88rem;
+      text-decoration: none;
+      transition: background 0.2s, color 0.2s;
+      backdrop-filter: blur(6px);
+    }
+    .gh-link:hover { background: rgba(255,255,255,0.10); color: var(--text); }
+
+    /* ── STATS BAR ── */
+    .stats-bar {
+      max-width: 860px;
+      margin: 0 auto 1.5rem;
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .stat-pill {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 50px;
+      padding: 0.35rem 1rem;
+      font-size: 0.82rem;
+      color: var(--muted);
+      backdrop-filter: blur(6px);
+    }
+    .stat-pill strong { color: var(--text); }
+
+    /* ── SEARCH ── */
+    .search-wrap {
+      max-width: 860px;
+      margin: 0 auto 1.5rem;
+    }
+    #search {
+      width: 100%;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.6rem 1rem;
+      color: var(--text);
+      font-size: 0.9rem;
+      outline: none;
+      backdrop-filter: blur(6px);
+      transition: border-color 0.2s;
+    }
+    #search::placeholder { color: var(--dim); }
+    #search:focus { border-color: rgba(245,158,11,0.5); }
+
+    /* ── TIMELINE ── */
+    .timeline {
+      max-width: 860px;
+      margin: 0 auto;
+      position: relative;
+    }
+
+    /* vertical line */
+    .timeline::before {
+      content: '';
+      position: absolute;
+      left: 25px;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--line);
+    }
+
+    /* ── COMMIT CARD ── */
+    .commit {
+      position: relative;
+      padding-left: 64px;
+      margin-bottom: 1rem;
+    }
+
+    /* dot on the line */
+    .commit::before {
+      content: '';
+      position: absolute;
+      left: 19px;
+      top: 18px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--gold);
+      border: 2px solid var(--bg0);
+      box-shadow: 0 0 0 2px rgba(245,158,11,0.25);
+      transition: background 0.2s;
+    }
+    .commit:hover::before { background: var(--red); }
+
+    .commit-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      backdrop-filter: blur(8px);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .commit-card:hover {
+      border-color: rgba(245,158,11,0.3);
+      box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+    }
+
+    /* clickable header row */
+    .commit-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      padding: 0.85rem 1.1rem;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .commit-subject {
+      flex: 1;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.4;
+      word-break: break-word;
+    }
+    .commit-subject .type-badge {
+      display: inline-block;
+      border-radius: 5px;
+      padding: 0.1rem 0.45rem;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-right: 0.4rem;
+      vertical-align: middle;
+    }
+
+    .commit-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    .sha-link {
+      font-family: 'Consolas', monospace;
+      font-size: 0.8rem;
+      color: var(--blue);
+      text-decoration: none;
+      background: rgba(59,130,246,0.10);
+      border-radius: 6px;
+      padding: 0.15rem 0.5rem;
+      white-space: nowrap;
+    }
+    .sha-link:hover { background: rgba(59,130,246,0.22); color: #93c5fd; }
+
+    .expand-icon {
+      color: var(--dim);
+      font-size: 0.85rem;
+      transition: transform 0.2s;
+      flex-shrink: 0;
+      padding-top: 2px;
+    }
+    .commit-card.open .expand-icon { transform: rotate(180deg); }
+
+    /* meta row below subject */
+    .commit-footer {
+      padding: 0 1.1rem 0.7rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .meta-item {
+      font-size: 0.78rem;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+    .avatar {
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      vertical-align: middle;
+    }
+
+    /* ── BODY / DETAIL ── */
+    .commit-body {
+      display: none;
+      border-top: 1px solid var(--line);
+      padding: 0.85rem 1.1rem;
+    }
+    .commit-card.open .commit-body { display: block; }
+
+    .body-text {
+      font-size: 0.85rem;
+      color: #d1d5db;
+      white-space: pre-wrap;
+      font-family: 'Consolas', 'Cascadia Code', monospace;
+      line-height: 1.65;
+      background: rgba(0,0,0,0.25);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.75rem;
+      overflow-x: auto;
+    }
+
+    .detail-links {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+    .detail-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.3rem 0.75rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-decoration: none;
+      transition: background 0.2s, color 0.2s;
+    }
+    .detail-link:hover { background: rgba(255,255,255,0.12); color: var(--text); }
+
+    /* ── LOAD MORE ── */
+    .load-more-wrap {
+      max-width: 860px;
+      margin: 1.5rem auto 0;
+      text-align: center;
+    }
+    #load-more-btn {
+      background: linear-gradient(135deg, rgba(245,158,11,0.15), rgba(239,68,68,0.15));
+      border: 1px solid rgba(245,158,11,0.35);
+      border-radius: 50px;
+      padding: 0.65rem 2rem;
+      color: var(--gold);
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+    #load-more-btn:hover {
+      background: linear-gradient(135deg, rgba(245,158,11,0.25), rgba(239,68,68,0.25));
+      box-shadow: 0 2px 16px rgba(245,158,11,0.2);
+    }
+    #load-more-btn:disabled { opacity: 0.4; cursor: default; }
+
+    /* ── STATE CARDS ── */
+    .state-card {
+      max-width: 860px;
+      margin: 3rem auto;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.95rem;
+      padding: 2rem;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      backdrop-filter: blur(8px);
+    }
+    .state-card .emoji { font-size: 2.5rem; margin-bottom: 0.6rem; }
+    .spinner {
+      width: 32px; height: 32px;
+      border: 3px solid var(--border);
+      border-top-color: var(--gold);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 0 auto 0.8rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── FOOTER ── */
+    footer {
+      max-width: 860px;
+      margin: 3rem auto 0;
+      font-size: 0.78rem;
+      color: var(--dim);
+      text-align: center;
+    }
+    footer a { color: var(--dim); text-decoration: none; }
+    footer a:hover { color: var(--muted); }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 600px) {
+      .commit { padding-left: 48px; }
+      .timeline::before { left: 17px; }
+      .commit::before { left: 11px; }
+      .commit-header { flex-direction: column; }
+      .commit-meta { flex-direction: row; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <a href="index.html" class="back-btn">← Back to App</a>
+    <h1 class="page-title">📋 Commit History</h1>
+    <a href="https://github.com/unaveragetech/trulysporting/commits/main"
+       class="gh-link" target="_blank" rel="noopener">
+      ⎇ View on GitHub
+    </a>
+  </div>
+
+  <!-- STATS BAR (filled by JS) -->
+  <div class="stats-bar" id="stats-bar">
+    <div class="stat-pill">Loading…</div>
+  </div>
+
+  <!-- SEARCH -->
+  <div class="search-wrap">
+    <input type="search" id="search" placeholder="🔍  Filter commits by message, author, or SHA…" autocomplete="off">
+  </div>
+
+  <!-- TIMELINE -->
+  <div class="timeline" id="timeline">
+    <div class="state-card" id="loading-card">
+      <div class="spinner"></div>
+      Fetching commit history from GitHub…
+    </div>
+  </div>
+
+  <!-- LOAD MORE -->
+  <div class="load-more-wrap">
+    <button id="load-more-btn" onclick="loadMore()" style="display:none">
+      ⬇ Load More Commits
+    </button>
+  </div>
+
+  <!-- AD SLOT -->
+  <div style="max-width:860px;margin:2rem auto 0">
+    <ins class="adsbygoogle"
+         style="display:block;min-height:90px;"
+         data-ad-client="ca-pub-8003312242019311"
+         data-ad-format="auto"
+         data-full-width-responsive="true"></ins>
+    <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+  </div>
+
+  <footer>
+    <p>
+      &copy; 2026 TrulySporting &nbsp;|&nbsp;
+      <a href="index.html">Home</a> &nbsp;|&nbsp;
+      <a href="https://github.com/unaveragetech/trulysporting" target="_blank" rel="noopener">GitHub</a>
+      &nbsp;|&nbsp; Data provided by GitHub REST API
+    </p>
+  </footer>
+
+  <script>
+  (function () {
+    'use strict';
+
+    var REPO    = 'unaveragetech/trulysporting';
+    var API     = 'https://api.github.com/repos/' + REPO + '/commits';
+    var GH_BASE = 'https://github.com/' + REPO + '/commit/';
+    var PER_PAGE = 30;
+
+    var page          = 1;
+    var allCommits    = [];   // every commit loaded so far
+    var totalLoaded   = 0;
+    var hasMore       = true;
+    var searchQuery   = '';
+
+    // ── TYPE BADGE COLOURS ──────────────────────────────────────
+    var TYPE_COLOURS = {
+      feat:     { bg: 'rgba(34,197,94,0.18)',  fg: '#22c55e' },
+      fix:      { bg: 'rgba(239,68,68,0.18)',   fg: '#ef4444' },
+      docs:     { bg: 'rgba(59,130,246,0.18)',  fg: '#60a5fa' },
+      refactor: { bg: 'rgba(139,92,246,0.18)', fg: '#a78bfa' },
+      chore:    { bg: 'rgba(156,163,175,0.18)',fg: '#9ca3af' },
+      perf:     { bg: 'rgba(245,158,11,0.18)', fg: '#f59e0b' },
+      test:     { bg: 'rgba(6,182,212,0.18)',  fg: '#22d3ee' },
+      style:    { bg: 'rgba(244,114,182,0.18)',fg: '#f472b6' },
+      ci:       { bg: 'rgba(251,191,36,0.18)', fg: '#fbbf24' },
+      build:    { bg: 'rgba(180,83,9,0.18)',   fg: '#d97706' },
+    };
+
+    function badgeFor(subject) {
+      var m = subject.match(/^(\w+)(\(.+?\))?[!]?:/);
+      if (!m) return null;
+      var type = m[1].toLowerCase();
+      var c    = TYPE_COLOURS[type] || { bg: 'rgba(255,255,255,0.10)', fg: '#d1d5db' };
+      return { type: type, bg: c.bg, fg: c.fg };
+    }
+
+    // ── RELATIVE TIME ──────────────────────────────────────────
+    function relativeTime(isoStr) {
+      var diff = Math.floor((Date.now() - new Date(isoStr)) / 1000);
+      if (diff <  60)  return diff + 's ago';
+      if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+      if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+      if (diff < 2592000) return Math.floor(diff / 86400) + 'd ago';
+      if (diff < 31536000) return Math.floor(diff / 2592000) + 'mo ago';
+      return Math.floor(diff / 31536000) + 'y ago';
+    }
+
+    // ── ABSOLUTE DATE ─────────────────────────────────────────
+    function absDate(isoStr) {
+      var d = new Date(isoStr);
+      return d.toLocaleDateString('en-US', {
+        year: 'numeric', month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      });
+    }
+
+    // ── ESCAPE HTML ───────────────────────────────────────────
+    function esc(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // ── BUILD ONE COMMIT CARD ─────────────────────────────────
+    function buildCard(c) {
+      var sha     = c.sha;
+      var short   = sha.slice(0, 7);
+      var msg     = c.commit.message || '';
+      var lines   = msg.split('\n');
+      var subject = lines[0].trim();
+      var body    = lines.slice(1).join('\n').trim();
+
+      var authorName  = (c.commit.author  && c.commit.author.name)  || 'Unknown';
+      var authorDate  = (c.commit.author  && c.commit.author.date)  || '';
+      var avatarUrl   = (c.author && c.author.avatar_url)
+                        ? c.author.avatar_url + '&s=36'
+                        : 'https://github.com/ghost.png';
+      var authorLogin = c.author ? c.author.login : authorName;
+      var authorLink  = c.author
+                        ? 'https://github.com/' + c.author.login
+                        : '#';
+
+      var badge = badgeFor(subject);
+      var badgeHtml = badge
+        ? '<span class="type-badge" style="background:' + badge.bg +
+          ';color:' + badge.fg + '">' + esc(badge.type) + '</span>'
+        : '';
+
+      // strip the "type: " prefix from subject display if badge was extracted
+      var displaySubject = badge
+        ? subject.replace(/^\w+(\(.+?\))?[!]?:\s*/, '')
+        : subject;
+
+      var bodySection = '';
+      if (body) {
+        bodySection = '<div class="body-text">' + esc(body) + '</div>';
+      }
+
+      var parents = c.parents || [];
+      var diffLink = GH_BASE + sha;
+      var compareLink = parents.length
+        ? 'https://github.com/' + REPO + '/compare/' + parents[0].sha + '...' + sha
+        : diffLink;
+
+      return '<div class="commit" data-sha="' + sha + '" data-msg="' + esc(msg.toLowerCase()) +
+             '" data-author="' + esc(authorLogin.toLowerCase()) + '">' +
+        '<div class="commit-card" id="card-' + short + '">' +
+          '<div class="commit-header" onclick="toggleCard(\'card-' + short + '\')">' +
+            '<div class="commit-subject">' + badgeHtml + esc(displaySubject) + '</div>' +
+            '<div class="commit-meta">' +
+              '<a href="' + diffLink + '" target="_blank" rel="noopener" ' +
+                 'class="sha-link" onclick="event.stopPropagation()">' + short + '</a>' +
+              '<span class="expand-icon">▼</span>' +
+            '</div>' +
+          '</div>' +
+          '<div class="commit-footer">' +
+            '<span class="meta-item">' +
+              '<img class="avatar" src="' + esc(avatarUrl) + '" alt="" loading="lazy">' +
+              '<a href="' + esc(authorLink) + '" target="_blank" rel="noopener" ' +
+                 'style="color:inherit;text-decoration:none">' + esc(authorLogin) + '</a>' +
+            '</span>' +
+            '<span class="meta-item" title="' + esc(absDate(authorDate)) + '">' +
+              '🕐 ' + esc(relativeTime(authorDate)) +
+            '</span>' +
+            '<span class="meta-item" style="color:#4b5563;font-size:0.72rem">' +
+              esc(absDate(authorDate)) +
+            '</span>' +
+          '</div>' +
+          '<div class="commit-body">' +
+            bodySection +
+            '<div class="detail-links">' +
+              '<a href="' + diffLink + '" target="_blank" rel="noopener" class="detail-link">' +
+                '🔗 View commit on GitHub' +
+              '</a>' +
+              '<a href="' + compareLink + '" target="_blank" rel="noopener" class="detail-link">' +
+                '↔ Compare diff' +
+              '</a>' +
+              '<a href="https://github.com/' + REPO + '/blob/' + sha + '/sporting.py" ' +
+                 'target="_blank" rel="noopener" class="detail-link">' +
+                '📄 Browse files at this commit' +
+              '</a>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }
+
+    // ── RENDER / FILTER ──────────────────────────────────────
+    function renderAll() {
+      var tl = document.getElementById('timeline');
+      var q  = searchQuery.toLowerCase().trim();
+      var filtered = q
+        ? allCommits.filter(function (c) {
+            return (c.commit.message || '').toLowerCase().indexOf(q) >= 0
+              || ( c.author && c.author.login.toLowerCase().indexOf(q) >= 0 )
+              || c.sha.indexOf(q) === 0;
+          })
+        : allCommits;
+
+      if (filtered.length === 0) {
+        tl.innerHTML = '<div class="state-card"><div class="emoji">🔍</div>' +
+                       'No commits match <strong>"' + esc(q) + '"</strong></div>';
+        return;
+      }
+
+      tl.innerHTML = filtered.map(buildCard).join('');
+    }
+
+    // ── STATS BAR ─────────────────────────────────────────────
+    function updateStats() {
+      var authors = {};
+      allCommits.forEach(function (c) {
+        var a = c.author ? c.author.login : (c.commit.author && c.commit.author.name) || '?';
+        authors[a] = (authors[a] || 0) + 1;
+      });
+      var topAuthor = Object.keys(authors).sort(function (a, b) {
+        return authors[b] - authors[a];
+      })[0] || '—';
+
+      var newestDate = allCommits.length
+        ? new Date(allCommits[0].commit.author.date).toLocaleDateString('en-US',
+            { year: 'numeric', month: 'short', day: 'numeric' })
+        : '—';
+      var oldestDate = allCommits.length
+        ? new Date(allCommits[allCommits.length - 1].commit.author.date).toLocaleDateString(
+            'en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+        : '—';
+
+      document.getElementById('stats-bar').innerHTML =
+        '<div class="stat-pill"><strong>' + allCommits.length + (hasMore ? '+' : '') + '</strong> commits loaded</div>' +
+        '<div class="stat-pill">🧑‍💻 Top contributor: <strong>' + esc(topAuthor) + '</strong></div>' +
+        '<div class="stat-pill">📅 Latest: <strong>' + esc(newestDate) + '</strong></div>' +
+        '<div class="stat-pill">📅 Oldest shown: <strong>' + esc(oldestDate) + '</strong></div>';
+    }
+
+    // ── FETCH PAGE ────────────────────────────────────────────
+    function fetchPage(pageNum) {
+      var url = API + '?per_page=' + PER_PAGE + '&page=' + pageNum;
+      document.getElementById('load-more-btn').disabled = true;
+
+      fetch(url, { headers: { 'Accept': 'application/vnd.github.v3+json' } })
+        .then(function (r) {
+          if (!r.ok) throw new Error('GitHub API returned ' + r.status);
+          return r.json();
+        })
+        .then(function (data) {
+          if (!Array.isArray(data) || data.length === 0) {
+            hasMore = false;
+            document.getElementById('load-more-btn').style.display = 'none';
+            return;
+          }
+          allCommits = allCommits.concat(data);
+          totalLoaded = allCommits.length;
+          if (data.length < PER_PAGE) {
+            hasMore = false;
+            document.getElementById('load-more-btn').style.display = 'none';
+          } else {
+            document.getElementById('load-more-btn').style.display = 'inline-block';
+            document.getElementById('load-more-btn').disabled = false;
+          }
+          renderAll();
+          updateStats();
+        })
+        .catch(function (err) {
+          document.getElementById('timeline').innerHTML =
+            '<div class="state-card"><div class="emoji">⚠️</div>' +
+            '<p>Could not load commits.</p><p style="margin-top:0.5rem;font-size:0.8rem;color:#6b7280">' +
+            esc(err.message) + '</p>' +
+            '<p style="margin-top:0.75rem"><a href="https://github.com/' + REPO +
+            '/commits/main" target="_blank" rel="noopener" ' +
+            'style="color:#3b82f6">View directly on GitHub →</a></p></div>';
+        });
+    }
+
+    // ── PUBLIC: toggle expand ─────────────────────────────────
+    window.toggleCard = function (id) {
+      var card = document.getElementById(id);
+      if (card) card.classList.toggle('open');
+    };
+
+    // ── PUBLIC: load more ─────────────────────────────────────
+    window.loadMore = function () {
+      page++;
+      fetchPage(page);
+    };
+
+    // ── SEARCH ───────────────────────────────────────────────
+    var searchDebounce;
+    document.getElementById('search').addEventListener('input', function (e) {
+      clearTimeout(searchDebounce);
+      searchQuery = e.target.value;
+      searchDebounce = setTimeout(renderAll, 200);
+    });
+
+    // ── INIT ─────────────────────────────────────────────────
+    fetchPage(1);
+  })();
+  </script>
+
+</body>
+</html>
