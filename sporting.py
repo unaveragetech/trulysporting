@@ -2836,7 +2836,7 @@ class ESPNWorker:
             profile['bio'] = {'display_name': player_name, 'headshot': ''}
 
         # 2. Boxscore game log from player_game_stats table
-        pgs_df = self.db.get_player_game_log(sport_key, player_name)
+        pgs_df = self.db.get_player_game_log(sport_key, player_name, str(player_id))
         if not pgs_df.empty:
             import json as _j
             rows = []
@@ -5329,20 +5329,27 @@ def main():
                 )
                 _pt_season_lbl = ESPNWorker._season_label(_pt_cat, _pt_season)
 
-            # ── Team selector — uses roster table first, falls back to teams_registry ─
-            _pt_roster_teams = db.get_roster_teams_df(_pt_sport_key)
+            # ── Team selector — all teams from league first, fall back to roster-only ─
             _pt_teams_df     = db.get_teams_df(_pt_sport_key)
+            _pt_roster_teams = db.get_roster_teams_df(_pt_sport_key)
 
             with _pt_r1c3:
-                if not _pt_roster_teams.empty and 'team_name' in _pt_roster_teams.columns:
-                    _pt_team_opts = {
-                        str(r['team_id']): f"{r.get('team_name', r['team_abbr'])} ({r['team_abbr']})"
-                        for _, r in _pt_roster_teams.iterrows()
-                    }
-                elif not _pt_teams_df.empty:
+                # Prefer the full teams_registry (all teams in this league).
+                # Only fall back to teams-with-rosters if teams_registry is empty
+                # (i.e. the user hasn't clicked Load Teams on the Teams tab yet).
+                if not _pt_teams_df.empty:
                     _pt_team_opts = {
                         str(r['team_id']): f"{r['team_name']} ({r['team_abbr']})"
                         for _, r in _pt_teams_df.iterrows()
+                    }
+                elif not _pt_roster_teams.empty:
+                    _pt_team_opts = {
+                        str(r['team_id']): (
+                            f"{r['team_name']} ({r['team_abbr']})"
+                            if 'team_name' in r and r['team_name']
+                            else f"{r['team_abbr']}"
+                        )
+                        for _, r in _pt_roster_teams.iterrows()
                     }
                 else:
                     _pt_team_opts = {}
