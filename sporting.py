@@ -7596,8 +7596,8 @@ def main():
         _cx    = cfg.get('chart_x', '')
         _cy    = cfg.get('chart_y', '')
 
-        # ── schema_live: re-fetch the ESPN endpoint using stored field list ──
-        if _src == 'schema_live':
+        # ── schema_live / espn_live: re-fetch the ESPN endpoint ──────
+        if _src in ('schema_live', 'espn_live'):
             _sl_url    = cfg.get('schema_url', '')
             _sl_params = cfg.get('schema_params', {})
             _sl_fields = cfg.get('schema_fields', [])
@@ -8263,12 +8263,13 @@ def main():
 
         # ── Main builder expander ──────────────────────────────────
         with st.expander("➕ Create a New Custom View", expanded=False):
-            _cvb_r1, _cvb_r2, _cvb_r3 = st.columns([3, 2, 3])
 
+            # ── Name / sport row ──────────────────────────────────
+            _cvb_r1, _cvb_r2 = st.columns([4, 3])
             with _cvb_r1:
                 _cv_name = st.text_input(
                     "View Name *",
-                    placeholder="e.g. NFL Rushing Leaders",
+                    placeholder="e.g. EPL Match Odds",
                     key='cvb_name',
                 )
                 _cv_desc = st.text_input(
@@ -8276,16 +8277,28 @@ def main():
                     placeholder="Short summary shown in the Custom Views tab",
                     key='cvb_desc',
                 )
-
             with _cvb_r2:
                 _cv_sport = st.selectbox(
                     "Sport / League",
                     EndpointRegistry.get_all_keys(),
                     key='cvb_sport',
                 )
+                _cv_src_type = st.radio(
+                    "Data source type",
+                    ["📦 Stored DB table", "📡 ESPN live (crawler)"],
+                    horizontal=True,
+                    key='cvb_src_type',
+                    help=(
+                        "**Stored DB** — uses rows already saved in your local database. "
+                        "**ESPN live** — fetches the ESPN API now and uses every field the "
+                        "crawler discovered, including ones our parsers don't yet store."
+                    ),
+                )
 
-            with _cvb_r3:
-                # Show data source with row counts so user knows what has data
+            # ════════════════════════════════════════════════════════
+            # PATH A — Stored DB table
+            # ════════════════════════════════════════════════════════
+            if _cv_src_type == "📦 Stored DB table":
                 _available_src_labels = {}
                 for _sk, (_sl, _sd) in _CVB_SOURCES.items():
                     _rc = _cvb_row_count(_cv_sport, _sk)
@@ -8295,67 +8308,212 @@ def main():
                         else f"{_sl}  (0 rows — needs data)"
                     )
                 _cv_data_src = st.selectbox(
-                    "Data Source",
+                    "Table",
                     list(_CVB_SOURCES.keys()),
                     format_func=lambda k: _available_src_labels.get(k, k),
-                    key='cvb_src',
+                    key='cvb_src_db',
                     help=(
-                        "Pick any DB table. Row counts are shown. "
-                        "Sources with 0 rows need the relevant tab populated first — "
-                        "expand 'What's in your local database?' above for instructions."
+                        "Each entry shows how many rows are stored for this league. "
+                        "Sources showing '0 rows' need their corresponding tab populated first."
                     ),
                 )
 
-            # ── Live load from DB ─────────────────────────────────
-            _cvb_df      = _cvb_load_df(_cv_sport, _cv_data_src)
-            _cvb_cols    = list(_cvb_df.columns) if not _cvb_df.empty else []
-            _cvb_numcols = (
-                [c for c in _cvb_cols if pd.api.types.is_numeric_dtype(_cvb_df[c])]
-                if not _cvb_df.empty else []
-            )
-            _cvb_ok = bool(_cvb_cols)
+                _cvb_df      = _cvb_load_df(_cv_sport, _cv_data_src)
+                _cvb_cols    = list(_cvb_df.columns) if not _cvb_df.empty else []
+                _cvb_numcols = [c for c in _cvb_cols if pd.api.types.is_numeric_dtype(_cvb_df[c])]
+                _cvb_ok      = bool(_cvb_cols)
+                _cvb_is_live = False
+                _cvb_live_url    = ''
+                _cvb_live_params = {}
+                _cvb_live_fields: List[str] = []
 
-            if not _cvb_ok:
-                _src_how = (
-                    'Sync Scoreboard tab' if _cv_data_src in ('game_history', 'scoreboard')
-                    else 'sync the Scoreboard tab' if _cv_data_src in ('standings', 'rankings', 'news')
-                    else 'go to Teams tab → Load Teams' if _cv_data_src == 'teams'
-                    else 'Teams tab → Load Teams → Load Detail' if _cv_data_src == 'team_detail'
-                    else 'go to Player Trends → Load Roster' if _cv_data_src == 'roster'
-                    else 'fetch game summaries then click Sync Player Stats on Player Trends' if _cv_data_src == 'player_stats'
-                    else 'fetch game summaries via Scoreboard → Fetch Summary' if _cv_data_src == 'play_by_play'
-                    else 'go to Player Trends → Build Profile' if _cv_data_src == 'player_profiles'
-                    else 'populate the relevant tab first'
+                if not _cvb_ok:
+                    _src_how = (
+                        'Sync Scoreboard tab' if _cv_data_src in ('game_history',)
+                        else 'sync the Scoreboard tab' if _cv_data_src in ('standings', 'rankings', 'news')
+                        else 'Teams tab → Load Teams' if _cv_data_src == 'teams'
+                        else 'Teams tab → Load Teams → Load Detail' if _cv_data_src == 'team_detail'
+                        else 'Player Trends → Load Roster' if _cv_data_src == 'roster'
+                        else 'Scoreboard → Fetch Summary → Sync Player Stats' if _cv_data_src == 'player_stats'
+                        else 'Scoreboard → Fetch Summary' if _cv_data_src == 'play_by_play'
+                        else 'Player Trends → Build Profile' if _cv_data_src == 'player_profiles'
+                        else 'populate the relevant tab first'
+                    )
+                    st.warning(
+                        f"⚠️ **{_CVB_SOURCES[_cv_data_src][0]}** has no data for "
+                        f"**{_cv_sport}** yet.  To populate: *{_src_how}*."
+                    )
+
+            # ════════════════════════════════════════════════════════
+            # PATH B — ESPN live via crawler
+            # ════════════════════════════════════════════════════════
+            else:
+                # Build endpoint map for this sport
+                _cvb_ep_list = [
+                    ep for ep in crawler.build_endpoints()
+                    if ep['sport_key'] == _cv_sport
+                ]
+                _cvb_ep_labels = {
+                    ep['endpoint_type']: ep
+                    for ep in _cvb_ep_list
+                }
+
+                if not _cvb_ep_list:
+                    st.warning(
+                        f"No endpoints registered for **{_cv_sport}**. "
+                        "Check EndpointRegistry or crawl this league first."
+                    )
+                    st.stop()
+
+                # How many fields have been discovered per endpoint?
+                _cvb_ep_field_counts: Dict[str, int] = {}
+                for _et, _ep_obj in _cvb_ep_labels.items():
+                    _ep_df = db.get_schema_df(sport_key=_cv_sport, endpoint_type=_et)
+                    _cvb_ep_field_counts[_et] = len(_ep_df)
+
+                _cv_data_src = 'espn_live'
+                _cv_ep_type = st.selectbox(
+                    "ESPN Endpoint",
+                    list(_cvb_ep_labels.keys()),
+                    format_func=lambda et: (
+                        f"{et}  ({_cvb_ep_field_counts.get(et, 0):,} fields discovered)"
+                        if _cvb_ep_field_counts.get(et, 0) > 0
+                        else f"{et}  (not yet crawled — crawl first for field hints)"
+                    ),
+                    key='cvb_src_ep',
+                    help=(
+                        "Select which ESPN endpoint to hit live. "
+                        "Endpoints showing field counts have been crawled — "
+                        "their fields load in the picker below. "
+                        "Un-crawled endpoints still work; you'll need to type paths manually."
+                    ),
                 )
-                st.warning(
-                    f"⚠️ **{_CVB_SOURCES[_cv_data_src][0]}** has no data for "
-                    f"**{_cv_sport}** yet. "
-                    f"To populate it: *{_src_how}*."
+                _cvb_sel_ep   = _cvb_ep_labels[_cv_ep_type]
+                _cvb_live_url    = _cvb_sel_ep['url']
+                _cvb_live_params = _cvb_sel_ep.get('params', {})
+
+                st.caption(f"🌐 `{_cvb_live_url}`" + (f"  `{_cvb_live_params}`" if _cvb_live_params else ""))
+
+                # Field picker — populated from crawled schema if available
+                _cvb_ep_schema_df = db.get_schema_df(sport_key=_cv_sport, endpoint_type=_cv_ep_type)
+                _cvb_all_paths    = _cvb_ep_schema_df['field_path'].tolist() if not _cvb_ep_schema_df.empty else []
+                _cvb_n_paths      = len(_cvb_all_paths)
+
+                if _cvb_n_paths == 0:
+                    st.info(
+                        f"No fields discovered yet for `{_cv_ep_type}`. "
+                        "Click **🕷 Crawl Endpoints** at the top of this tab (set Sport filter to this league), "
+                        "then return here — the field picker will populate automatically."
+                    )
+                else:
+                    st.caption(
+                        f"**{_cvb_n_paths:,} fields available** from crawl of `{_cv_ep_type}`. "
+                        "Search inside the picker or use quick groups below."
+                    )
+
+                # Quick-group checkboxes
+                _cvb_grp_map: Dict[str, List[str]] = {}
+                for _fp in _cvb_all_paths:
+                    _segs = [s.rstrip(']') for s in re.split(r'[.\[]', _fp) if s and not s.rstrip(']').isdigit()]
+                    _grp  = '.'.join(_segs[:3]) or '(root)'
+                    _cvb_grp_map.setdefault(_grp, []).append(_fp)
+
+                _cvb_top_groups = sorted(_cvb_grp_map.items(), key=lambda x: (-len(x[1]), x[0]))[:16]
+                _cvb_grp_adds: List[str] = []
+                if _cvb_top_groups:
+                    st.markdown("**Quick-select field groups:**")
+                    _gc_cols = st.columns(min(4, len(_cvb_top_groups)))
+                    for _gi, (_grp, _gpaths) in enumerate(_cvb_top_groups):
+                        with _gc_cols[_gi % 4]:
+                            if st.checkbox(
+                                f"{_grp} ({len(_gpaths)})",
+                                key=f'cvb_grp_{_gi}',
+                                help=f"Add all {len(_gpaths)} fields under `{_grp}`",
+                            ):
+                                _cvb_grp_adds.extend(_gpaths)
+                    _cvb_grp_adds = list(dict.fromkeys(_cvb_grp_adds))
+
+                _cvb_live_fields = st.multiselect(
+                    f"Fields to extract ({_cvb_n_paths:,} available — type to search)",
+                    options=_cvb_all_paths,
+                    default=[p for p in _cvb_grp_adds if p in _cvb_all_paths][:60],
+                    key='cvb_live_fields',
+                    placeholder="Type any part of a field name…",
+                    help=(
+                        "Each selected path becomes one column in the output. "
+                        "Names are shortened to the last 3 path segments automatically."
+                    ),
                 )
 
-            # ── Display type ──────────────────────────────────────
+                # Fetch button — loads data into session state for column pickers
+                _cvb_fetch_key = f"cvb_live_df_{_cv_sport}_{_cv_ep_type}"
+                _cvb_fetch_col1, _cvb_fetch_col2 = st.columns([2, 4])
+                with _cvb_fetch_col1:
+                    _do_cvb_fetch = st.button(
+                        f"📡 Fetch ({len(_cvb_live_fields)} fields)",
+                        key='cvb_fetch_btn',
+                        disabled=not bool(_cvb_live_fields),
+                        type='primary',
+                        help="Hits the ESPN endpoint now and populates column pickers below.",
+                    )
+                with _cvb_fetch_col2:
+                    if not _cvb_live_fields:
+                        st.caption("Select at least one field to enable fetch.")
+                    elif _cvb_all_paths:
+                        st.caption(
+                            f"Ready to fetch `{_cv_ep_type}` — "
+                            f"{len(_cvb_live_fields)} columns selected."
+                        )
+
+                if _do_cvb_fetch:
+                    with st.spinner(f"Fetching {_cvb_live_url}…"):
+                        _fetched_df, _fetch_err = _schema_extract_to_df(
+                            _cvb_live_url, _cvb_live_params, _cvb_live_fields,
+                        )
+                    if _fetch_err:
+                        st.error(f"Fetch error: {_fetch_err}")
+                    elif _fetched_df.empty:
+                        st.warning("Fetch returned 0 rows. Try selecting paths from a shared root array.")
+                    else:
+                        st.session_state[_cvb_fetch_key] = _fetched_df
+                        st.success(
+                            f"✅ {len(_fetched_df):,} rows × {len(_fetched_df.columns)} columns. "
+                            "Column pickers updated below."
+                        )
+
+                # Use cached fetch result for column pickers
+                _cvb_df = st.session_state.get(_cvb_fetch_key, pd.DataFrame())
+                _cvb_cols    = list(_cvb_df.columns) if not _cvb_df.empty else []
+                _cvb_numcols = [c for c in _cvb_cols if pd.api.types.is_numeric_dtype(_cvb_df[c])]
+                _cvb_ok      = bool(_cvb_cols)
+                _cvb_is_live = True
+
+                if not _cvb_ok and _cvb_live_fields:
+                    st.info("Click **📡 Fetch** above to load data and populate column pickers.")
+
+            # ════════════════════════════════════════════════════════
+            # SHARED — chart type + column pickers + filter + preview
+            # ════════════════════════════════════════════════════════
+            st.markdown("---")
             _cv_chart = st.selectbox(
                 "Display As",
                 ['table', 'bar_chart', 'line_chart', 'scatter', 'metric_cards'],
                 key='cvb_chart',
                 help=(
-                    "table = full sortable dataframe  |  bar/line/scatter = Plotly chart  "
+                    "table = sortable dataframe  |  bar/line/scatter = Plotly chart  "
                     "|  metric_cards = up to 5 large KPI tiles"
                 ),
             )
             _need_axes = _cv_chart in ('bar_chart', 'line_chart', 'scatter', 'metric_cards')
 
-            # ── Column pickers ────────────────────────────────────
             _cvc1, _cvc2, _cvc3 = st.columns(3)
-
             with _cvc1:
                 if _need_axes:
                     _cv_chart_x = st.selectbox(
                         "X axis / Label column",
-                        _cvb_cols if _cvb_ok else ['(no data yet)'],
+                        _cvb_cols if _cvb_ok else ['(fetch data first)'],
                         key='cvb_cx',
                         disabled=not _cvb_ok,
-                        help="The column used as the category axis or label.",
                     )
                     if not _cvb_ok:
                         _cv_chart_x = ''
@@ -8368,33 +8526,23 @@ def main():
                     _yopts = _cvb_numcols if _cvb_numcols else _cvb_cols
                     _cv_chart_y = st.selectbox(
                         "Y axis / Value column",
-                        _yopts if _cvb_ok else ['(no data yet)'],
+                        _yopts if _cvb_ok else ['(fetch data first)'],
                         key='cvb_cy',
                         disabled=not _cvb_ok,
-                        help=(
-                            "Numeric column for the chart value axis. "
-                            "If no numeric columns exist, any column can be selected."
-                        ),
                     )
                     if not _cvb_ok:
                         _cv_chart_y = ''
                 else:
                     _cv_chart_y = ''
-                    st.empty()
 
             with _cvc3:
                 _cv_fcol_raw = st.selectbox(
                     "Filter column (optional)",
                     ['(none)'] + (_cvb_cols if _cvb_ok else []),
                     key='cvb_fcol',
-                    help=(
-                        "Optionally narrow the data by the value of this column. "
-                        "Filter value picker appears below once you choose a column."
-                    ),
                 )
                 _cv_filter_col = '' if _cv_fcol_raw == '(none)' else _cv_fcol_raw
 
-            # Filter value — always populated from real DB values
             _cv_filter_val = ''
             if _cv_filter_col and _cvb_ok and _cv_filter_col in _cvb_df.columns:
                 _fv_uniq = sorted(
@@ -8405,45 +8553,60 @@ def main():
                         f"Filter value for `{_cv_filter_col}`",
                         ['(all)'] + _fv_uniq,
                         key='cvb_fval',
-                        help=(
-                            "Only rows matching this value will be shown in the view. "
-                            "Choose (all) to show everything."
-                        ),
                     )
                     _cv_filter_val = '' if _cv_fval_sel == '(all)' else _cv_fval_sel
                 else:
                     st.caption(f"No values found in `{_cv_filter_col}`.")
             elif _cv_filter_col:
-                _cv_filter_val = st.text_input(
-                    "Filter value", key='cvb_fval',
-                    help="Type a value to filter on — partial match supported.",
-                )
+                _cv_filter_val = st.text_input("Filter value", key='cvb_fval')
 
             # ── Live Preview ──────────────────────────────────────
             st.markdown("---")
             st.markdown("##### 🔍 Live Preview")
             if _cvb_ok:
-                st.caption(
-                    f"Showing **{_CVB_SOURCES[_cv_data_src][0]}** "
-                    f"for **{_cv_sport}** "
-                    f"({len(_cvb_df):,} rows in DB)"
-                )
-                _cvb_now_cfg = dict(
-                    name=_cv_name or '(untitled)',
-                    description=_cv_desc or '',
-                    sport_key=_cv_sport,
-                    data_source=_cv_data_src,
-                    chart_type=_cv_chart,
-                    chart_x=_cv_chart_x if isinstance(_cv_chart_x, str) else '',
-                    chart_y=_cv_chart_y if isinstance(_cv_chart_y, str) else '',
-                    filter_col=_cv_filter_col,
-                    filter_val=_cv_filter_val if isinstance(_cv_filter_val, str) else '',
-                )
+                if _cvb_is_live:
+                    st.caption(
+                        f"Showing live data from **{_cv_ep_type}** for **{_cv_sport}** "
+                        f"({len(_cvb_df):,} rows fetched)"
+                    )
+                    _cvb_now_cfg = dict(
+                        name=_cv_name or '(untitled)',
+                        description=_cv_desc or '',
+                        sport_key=_cv_sport,
+                        data_source='espn_live',
+                        chart_type=_cv_chart,
+                        chart_x=_cv_chart_x if isinstance(_cv_chart_x, str) else '',
+                        chart_y=_cv_chart_y if isinstance(_cv_chart_y, str) else '',
+                        filter_col=_cv_filter_col,
+                        filter_val=_cv_filter_val if isinstance(_cv_filter_val, str) else '',
+                        schema_url=_cvb_live_url,
+                        schema_params=_cvb_live_params,
+                        schema_fields=_cvb_live_fields,
+                    )
+                else:
+                    _src_label = _CVB_SOURCES.get(_cv_data_src, (_cv_data_src, ''))[0]
+                    st.caption(
+                        f"Showing **{_src_label}** for **{_cv_sport}** "
+                        f"({len(_cvb_df):,} rows in DB)"
+                    )
+                    _cvb_now_cfg = dict(
+                        name=_cv_name or '(untitled)',
+                        description=_cv_desc or '',
+                        sport_key=_cv_sport,
+                        data_source=_cv_data_src,
+                        chart_type=_cv_chart,
+                        chart_x=_cv_chart_x if isinstance(_cv_chart_x, str) else '',
+                        chart_y=_cv_chart_y if isinstance(_cv_chart_y, str) else '',
+                        filter_col=_cv_filter_col,
+                        filter_val=_cv_filter_val if isinstance(_cv_filter_val, str) else '',
+                    )
                 _cv_run_view(_cvb_now_cfg)
             else:
                 st.info(
-                    "⬜ No preview available — the selected data source has no rows yet. "
-                    "See the warning above for how to populate it."
+                    "⬜ No preview yet — "
+                    + ("click **📡 Fetch** above to load live data."
+                       if _cv_src_type.startswith("📡")
+                       else "populate the selected DB table to see a preview.")
                 )
 
             # ── Save ──────────────────────────────────────────────
@@ -8451,22 +8614,31 @@ def main():
             _cvs_col1, _cvs_col2 = st.columns(2)
 
             def _cvb_build_cfg():
-                return dict(
+                _base = dict(
                     name=(_cv_name or '').strip(),
                     description=(_cv_desc or '').strip(),
                     sport_key=_cv_sport,
-                    data_source=_cv_data_src,
                     chart_type=_cv_chart,
                     chart_x=_cv_chart_x if isinstance(_cv_chart_x, str) else '',
                     chart_y=_cv_chart_y if isinstance(_cv_chart_y, str) else '',
                     filter_col=_cv_filter_col,
                     filter_val=_cv_filter_val if isinstance(_cv_filter_val, str) else '',
                 )
+                if _cvb_is_live:
+                    _base.update(dict(
+                        data_source='espn_live',
+                        schema_url=_cvb_live_url,
+                        schema_params=_cvb_live_params,
+                        schema_fields=_cvb_live_fields,
+                    ))
+                else:
+                    _base['data_source'] = _cv_data_src
+                return _base
 
             with _cvs_col1:
                 if st.button("💾 Add to Session", key='cvb_ses',
-                             help="Store this view for the current session only — lost on page reload."):
-                    if not _cv_name.strip():
+                             help="Store for this session only — lost on page reload."):
+                    if not (_cv_name or '').strip():
                         st.error("View Name is required.")
                     else:
                         st.session_state['cv_session_views'].append(_cvb_build_cfg())
@@ -8475,8 +8647,8 @@ def main():
 
             with _cvs_col2:
                 if st.button("📁 Save to Disk", key='cvb_disk',
-                             help="Write a JSON config file — view persists across restarts and appears on the Custom Views tab."):
-                    if not _cv_name.strip():
+                             help="Saves a JSON config — appears on the Custom Views tab after restart."):
+                    if not (_cv_name or '').strip():
                         st.error("View Name is required.")
                     else:
                         _new_cv = _cvb_build_cfg()
@@ -8491,7 +8663,7 @@ def main():
                             st.session_state['cv_session_views'].append(_new_cv)
                         st.success(
                             f"✅ Saved to `{_cv_path}`. "
-                            "It will appear on the **📋 Custom Views** tab."
+                            "Appears on the **📋 Custom Views** tab."
                         )
                         st.rerun()
 
