@@ -1339,6 +1339,39 @@ class SportsDB:
         conn.close()
         return df
 
+    def get_season_games_df(self, category: str, sport: str,
+                             season_year: int) -> pd.DataFrame:
+        """Return ALL stored games for an entire season.
+
+        Season windows:
+        - football:               YYYY-08-01 → YYYY+1-03-01 (captures Super Bowl)
+        - basketball / hockey:    YYYY-09-01 → YYYY+1-07-01
+        - baseball:               YYYY-02-01 → YYYY-11-30
+        - soccer (default):       YYYY-07-01 → YYYY+1-07-01
+        """
+        import datetime as _dt
+        yr = int(season_year)
+        cat = category.lower()
+        if cat == 'football':
+            start, end = f'{yr}-08-01', f'{yr+1}-03-01'
+        elif cat in ('basketball', 'hockey'):
+            start, end = f'{yr}-09-01', f'{yr+1}-07-01'
+        elif cat == 'baseball':
+            start, end = f'{yr}-02-01', f'{yr}-11-30'
+        else:
+            start, end = f'{yr}-07-01', f'{yr+1}-07-01'
+
+        conn = self.get_connection()
+        df = pd.read_sql_query(
+            """SELECT * FROM game_history
+               WHERE category=? AND sport=?
+                 AND event_date >= ? AND event_date <= ?
+               ORDER BY event_date DESC, id DESC""",
+            conn, params=(category, sport, start, end)
+        )
+        conn.close()
+        return df
+
     def get_most_recent_games_df(self, category: str, sport: str,
                                  limit: int = 30) -> pd.DataFrame:
         """Return the most recently stored games regardless of date."""
@@ -2047,6 +2080,71 @@ class ESPNWorker:
             force_refresh=True, params={'dates': date_str}
         )
 
+    @staticmethod
+    def _season_date_ranges(category: str, sport: str, season_year: int) -> list:
+        """Return list of (label, params_dict) chunks that together cover a full season.
+
+        Football uses ESPN's week+seasontype params (most reliable).
+        All other sports use monthly date-range chunks (dates=STARTYYYYMMDD-ENDYYYYMMDD).
+        """
+        import calendar as _cal
+        yr   = int(season_year)
+        cat  = category.lower()
+        chunks = []
+
+        if cat == 'football':
+            # Pre-season weeks 1-4
+            for w in range(1, 5):
+                chunks.append((f'Pre-Week {w}',
+                                {'season': yr, 'seasontype': 1, 'week': w, 'limit': 100}))
+            # Regular season weeks 1-18
+            for w in range(1, 19):
+                chunks.append((f'Week {w}',
+                                {'season': yr, 'seasontype': 2, 'week': w, 'limit': 100}))
+            # Post-season weeks 1-5 (Wild Card, Divisional, Championship, Pro Bowl, Super Bowl)
+            for w in range(1, 6):
+                chunks.append((f'Post-Week {w}',
+                                {'season': yr, 'seasontype': 3, 'week': w, 'limit': 100}))
+        else:
+            if cat in ('basketball', 'hockey'):
+                months = [(yr, m) for m in range(10, 13)] + \
+                         [(yr + 1, m) for m in range(1, 7)]
+            elif cat == 'baseball':
+                months = [(yr, m) for m in range(3, 11)]
+            else:
+                # Soccer and other: Jul YYYY – Jun YYYY+1
+                months = [(yr, m) for m in range(7, 13)] + \
+                         [(yr + 1, m) for m in range(1, 7)]
+
+            for m_yr, mo in months:
+                _, last_day = _cal.monthrange(m_yr, mo)
+                start = f'{m_yr}{mo:02d}01'
+                end   = f'{m_yr}{mo:02d}{last_day:02d}'
+                label = f'{m_yr}-{mo:02d}'
+                chunks.append((label, {'dates': f'{start}-{end}', 'limit': 200}))
+
+        return chunks
+
+    def fetch_full_season(self, category: str, sport: str, season_year: int,
+                          on_progress=None) -> int:
+        """Fetch every game of a season from ESPN and persist to game_history.
+
+        on_progress(done, total, label) is called after each chunk if provided.
+        Returns the number of chunks successfully fetched.
+        """
+        chunks  = self._season_date_ranges(category, sport, season_year)
+        total   = len(chunks)
+        fetched = 0
+        for i, (label, params) in enumerate(chunks):
+            try:
+                self.fetch_and_process(category, sport, 'scoreboard',
+                                       force_refresh=True, params=params)
+                fetched += 1
+            except Exception as _e:
+                self.last_error = str(_e)
+            if on_progress:
+                on_progress(i + 1, total, label)
+        return fetched
     def fetch_team_detail(self, category: str, sport: str,
                           team_id: str, team_slug: str = '') -> Optional[Dict]:
         """Fetch extended single-team data.
@@ -3953,111 +4051,196 @@ def main():
 
     # ── TAB 1: SCOREBOARD ─────────────────────────────────────
     with tab1:
+        import datetime as _dt1
         active_eps = json.loads(db.get_config('active_endpoints', '[]'))
         _ep1 = active_eps[0] if active_eps else ''
-        _render_tab_banner("Scoreboard", "Live scores · Per-quarter breakdowns · Leaders · Betting lines", _ep1)
+        _render_tab_banner("Scoreboard",
+                           "Full-season game browser · Live scores · Box scores · PBP",
+                           _ep1)
 
         if not active_eps:
             st.info("Select leagues in the sidebar to get started.")
         else:
-            col_ep, col_date, col_btn, col_btn2 = st.columns([2, 2, 1, 1])
-            with col_ep:
+            # ── Control bar ─────────────────────────────────────
+            _sb_c1, _sb_c2, _sb_c3 = st.columns([3, 2, 3])
+            with _sb_c1:
                 sel_ep = st.selectbox("League", active_eps, key="sb_ep")
-            with col_date:
-                sel_date = st.date_input("Date", value=datetime.now().date(), key="sb_date")
-            with col_btn:
-                st.write("")
-                fetch_btn = st.button("Fetch Date")
-            with col_btn2:
-                st.write("")
-                fetch_latest_btn = st.button("Latest Available")
-
             cat, sport = sel_ep.split('/')
 
-            if fetch_btn:
-                date_str = sel_date.strftime('%Y%m%d')
-                with st.spinner("Fetching scores…"):
-                    worker.fetch_date_scoreboard(cat, sport, date_str)
-                st.rerun()
+            with _sb_c2:
+                _sb_yr_list = list(range(_dt1.datetime.now().year,
+                                         _dt1.datetime.now().year - 8, -1))
+                _sb_def_yr  = ESPNWorker._espn_season_year(cat)
+                _sb_ssn_key = f'sb_season_{cat}'
+                if _sb_ssn_key not in st.session_state:
+                    st.session_state[_sb_ssn_key] = _sb_def_yr
+                sb_season = st.selectbox("Season", _sb_yr_list, key=_sb_ssn_key)
 
-            if fetch_latest_btn:
-                # Fetch undated — ESPN returns the current/most-recent week
-                with st.spinner("Fetching most recent games…"):
+            with _sb_c3:
+                _sb_status_filter = st.radio(
+                    "Show",
+                    ["All", "🔴 Live", "✅ Final", "🗓 Scheduled"],
+                    horizontal=True, key="sb_status_filter",
+                    label_visibility="collapsed"
+                )
+
+            # ── Auto-fetch on first visit to this league/season ─
+            _sb_auto_key = f'sb_auto_{cat}_{sport}_{sb_season}'
+            if not st.session_state.get(_sb_auto_key):
+                st.session_state[_sb_auto_key] = True
+                with st.spinner("Loading current schedule from ESPN…"):
                     worker.fetch_and_process(cat, sport, 'scoreboard', force_refresh=True)
-                    # Also fetch today's date explicitly to fill the date picker
-                    import datetime as _dt2
-                    _today_str = _dt2.datetime.now().strftime('%Y%m%d')
-                    worker.fetch_date_scoreboard(cat, sport, _today_str)
-                st.rerun()
+                    _today8 = _dt1.datetime.now().strftime('%Y%m%d')
+                    worker.fetch_date_scoreboard(cat, sport, _today8)
 
-            df_games = db.get_games_df(cat, sport, sel_date.isoformat())
-            fallback_used = False
+            # ── Load full season expander ────────────────────────
+            with st.expander("📅 Load / Refresh Season Data", expanded=False):
+                _lfs_c1, _lfs_c2 = st.columns([2, 1])
+                with _lfs_c1:
+                    st.caption(
+                        f"Fetches every week / month of the **{sb_season}** {sel_ep} season "
+                        f"from ESPN in one pass. This may take 20–60 seconds depending on "
+                        f"sport. Run once — results are cached."
+                    )
+                with _lfs_c2:
+                    _sb_full_btn = st.button(f"📥 Load Full {sb_season} Season",
+                                             key="sb_full_season", type="primary")
+
+                _sb_date_c1, _sb_date_c2 = st.columns([2, 1])
+                with _sb_date_c1:
+                    _sb_jump_date = st.date_input(
+                        "Fetch a specific date", value=_dt1.datetime.now().date(),
+                        key="sb_date_jump")
+                with _sb_date_c2:
+                    st.write("")
+                    _sb_date_btn = st.button("📡 Fetch Date", key="sb_fetch_date")
+
+                if _sb_date_btn:
+                    with st.spinner(f"Fetching {_sb_jump_date}…"):
+                        worker.fetch_date_scoreboard(cat, sport,
+                                                     _sb_jump_date.strftime('%Y%m%d'))
+                    st.rerun()
+
+                if _sb_full_btn:
+                    _chunks = ESPNWorker._season_date_ranges(cat, sport, sb_season)
+                    _prog   = st.progress(0, text="Starting…")
+                    for _ci, (_lbl, _prms) in enumerate(_chunks):
+                        _prog.progress((_ci + 1) / len(_chunks),
+                                       text=f"Fetching {_lbl} ({_ci+1}/{len(_chunks)})…")
+                        worker.fetch_and_process(cat, sport, 'scoreboard',
+                                                 force_refresh=True, params=_prms)
+                    _prog.progress(1.0, text="✅ Season loaded!")
+                    st.rerun()
+
+            # ── Query DB for all season games ────────────────────
+            df_games = db.get_season_games_df(cat, sport, sb_season)
 
             if df_games.empty:
-                # Auto-fallback: show most recently stored games for this sport
-                latest_date = db.get_latest_stored_date(cat, sport)
-                if latest_date:
-                    df_games = db.get_most_recent_games_df(cat, sport, limit=30)
-                    fallback_used = True
-                    st.info(
-                        f"📌 No games on **{sel_date}** for {sel_ep}. "
-                        f"Showing most recent stored games (latest: **{latest_date}**). "
-                        f"Click **Latest Available** to pull the current week from ESPN, "
-                        f"or click **Fetch Date** to search ESPN for the selected date."
+                st.info(
+                    f"No games stored for **{sel_ep}** — **{sb_season} season** yet. "
+                    f"Expand **📅 Load / Refresh Season Data** above and click "
+                    f"**📥 Load Full {sb_season} Season** to pull all games from ESPN."
+                )
+            else:
+                # ── Apply status filter ────────────────────────
+                if _sb_status_filter == "🔴 Live":
+                    df_games = df_games[df_games['status'].str.contains(
+                        'PROGRESS|HALF|LIVE', na=False, case=False)]
+                elif _sb_status_filter == "✅ Final":
+                    df_games = df_games[df_games['status'].str.contains(
+                        'FINAL', na=False, case=False)]
+                elif _sb_status_filter == "🗓 Scheduled":
+                    df_games = df_games[~df_games['status'].str.contains(
+                        'FINAL|PROGRESS|HALF|LIVE', na=False, case=False)]
+
+                # ── Optional team search ───────────────────────
+                _sb_search = st.text_input(
+                    "🔍 Filter by team", placeholder="e.g. Chiefs, Lakers, Yankees…",
+                    key="sb_team_filter", label_visibility="collapsed"
+                )
+                if _sb_search:
+                    _mask = (
+                        df_games['home_team'].str.contains(_sb_search, case=False, na=False) |
+                        df_games['away_team'].str.contains(_sb_search, case=False, na=False) |
+                        df_games.get('name', pd.Series(dtype=str)).str.contains(
+                            _sb_search, case=False, na=False)
                     )
-                else:
-                    st.info(
-                        f"No data yet for **{sel_ep}**. "
-                        f"Click **Latest Available** to fetch the current week, "
-                        f"or pick a past date and click **Fetch Date**."
-                    )
+                    df_games = df_games[_mask]
 
-            if not df_games.empty:
-                final_games = df_games[df_games['status'].str.contains('FINAL', na=False)]
-                live_games  = df_games[df_games['status'].str.contains('PROGRESS|HALF', na=False)]
-                sched_games = df_games[
-                    ~df_games['status'].str.contains('FINAL|PROGRESS|HALF', na=False)
-                ]
+                # ── Summary metrics ────────────────────────────
+                _sb_all   = len(df_games)
+                _sb_final = df_games['status'].str.contains('FINAL', na=False).sum()
+                _sb_live  = df_games['status'].str.contains('PROGRESS|HALF|LIVE',
+                                                             na=False, case=False).sum()
+                _sb_sched = _sb_all - _sb_final - _sb_live
 
-                m1, m2, m3, m4, m5 = st.columns([1, 1, 1, 1, 2])
-                m1.metric("Games", len(df_games),
-                          help="Recent fallback — not filtered by date" if fallback_used else "")
-                m2.metric("Final",     len(final_games))
-                m3.metric("Live",      len(live_games))
-                m4.metric("Scheduled", len(sched_games))
-                with m5:
-                    raw_mode = st.toggle("📋 View Raw Table", key="sb_raw_toggle")
+                _sm1, _sm2, _sm3, _sm4, _sm5 = st.columns([1, 1, 1, 1, 2])
+                _sm1.metric("Games", _sb_all)
+                _sm2.metric("Final", int(_sb_final))
+                _sm3.metric("Live",  int(_sb_live))
+                _sm4.metric("Scheduled", int(_sb_sched))
+                with _sm5:
+                    _sb_raw = st.toggle("📋 Raw Table", key="sb_raw_toggle")
 
-                if raw_mode:
-                    raw_cols = ['event_date', 'name', 'away_team', 'away_score',
-                                'home_score', 'home_team', 'status', 'venue',
-                                'broadcast', 'attendance', 'note']
-                    show_cols = [c for c in raw_cols if c in df_games.columns]
+                if _sb_raw:
+                    _raw_cols = ['event_date', 'name', 'away_team', 'away_score',
+                                 'home_score', 'home_team', 'status', 'venue',
+                                 'broadcast', 'attendance', 'note']
+                    _show = [c for c in _raw_cols if c in df_games.columns]
                     st.dataframe(
-                        df_games[show_cols].rename(columns={
+                        df_games[_show].rename(columns={
                             'event_date': 'Date', 'name': 'Game',
                             'away_team': 'Away', 'away_score': 'A',
                             'home_score': 'H', 'home_team': 'Home',
                             'status': 'Status', 'venue': 'Venue',
-                            'broadcast': 'TV', 'attendance': 'Attendance', 'note': 'Note',
+                            'broadcast': 'TV', 'attendance': 'Att', 'note': 'Note',
                         }),
                         use_container_width=True, hide_index=True,
                     )
                 else:
-                    if not live_games.empty:
+                    # ── Render live games at the top (no grouping) ─
+                    _df_live = df_games[df_games['status'].str.contains(
+                        'PROGRESS|HALF|LIVE', na=False, case=False)]
+                    if not _df_live.empty:
                         st.markdown("#### 🔴 In Progress")
-                        for _, g in live_games.iterrows():
-                            render_game_card(g, db=db, worker=worker, category=cat, sport=sport)
+                        for _, _g in _df_live.iterrows():
+                            render_game_card(_g, db=db, worker=worker,
+                                             category=cat, sport=sport)
 
-                    if not final_games.empty:
-                        st.markdown("#### ✅ Final")
-                        for _, g in final_games.iterrows():
-                            render_game_card(g, db=db, worker=worker, category=cat, sport=sport)
+                    # ── Group remaining games by date ──────────────
+                    _df_rest = df_games[~df_games['status'].str.contains(
+                        'PROGRESS|HALF|LIVE', na=False, case=False)].copy()
 
-                    if not sched_games.empty:
-                        st.markdown("#### 🗓 Scheduled")
-                        for _, g in sched_games.iterrows():
-                            render_game_card(g, db=db, worker=worker, category=cat, sport=sport)
+                    if not _df_rest.empty:
+                        # Ensure event_date is string for grouping
+                        _df_rest['event_date'] = _df_rest['event_date'].astype(str)
+                        _dates_sorted = sorted(_df_rest['event_date'].unique(), reverse=True)
+                        _today_str    = _dt1.datetime.now().strftime('%Y-%m-%d')
+
+                        for _d in _dates_sorted:
+                            _d_games = _df_rest[_df_rest['event_date'] == _d]
+                            _n       = len(_d_games)
+                            _fin     = _d_games['status'].str.contains('FINAL', na=False).sum()
+                            _scd     = _n - _fin
+
+                            # Build a short game summary for collapsed header
+                            _matchups = '  ·  '.join(
+                                f"{r['away_team']} vs {r['home_team']}"
+                                for _, r in _d_games.head(3).iterrows()
+                            ) + ('…' if _n > 3 else '')
+                            _statbadge = (f"✅ {_fin} final" if _fin == _n
+                                          else f"🗓 {_scd} scheduled" if _fin == 0
+                                          else f"✅ {_fin}  🗓 {_scd}")
+                            _label = (f"**{_d}**  ·  {_n} game{'s' if _n > 1 else ''}  "
+                                      f"·  {_statbadge}   {_matchups}")
+
+                            # Auto-expand today and the most-recent past date
+                            _auto_open = (_d == _today_str or
+                                          _d == _dates_sorted[0])
+                            with st.expander(_label, expanded=_auto_open):
+                                for _, _g in _d_games.iterrows():
+                                    render_game_card(_g, db=db, worker=worker,
+                                                     category=cat, sport=sport)
 
     # ── TAB 2: TEAM TRENDS ────────────────────────────────────
     with tab2:
