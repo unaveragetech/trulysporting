@@ -6,6 +6,7 @@ import time
 import threading
 import os
 import hmac
+import hashlib
 import pathlib
 import shutil
 import logging
@@ -4569,6 +4570,14 @@ def inject_adsense() -> None:
             logging.debug(f"AdSense index.html write failed (read-only fs?): {exc}")
 
 
+# ── Default admin credentials (SHA-256 hashed) ──────────────────────────────
+# Password : thisisa[assword1!
+# PIN      : 040419
+# These are written to the DB on first run. Change via Admin Panel after login.
+_ADMIN_PW_HASH  = hashlib.sha256('thisisa[assword1!'.encode()).hexdigest()
+_ADMIN_PIN_HASH = hashlib.sha256('040419'.encode()).hexdigest()
+
+
 def main():
     inject_adsense()   # no-op until ADSENSE_CLIENT / ADSENSE_SLOT are filled in
     st.set_page_config(
@@ -4801,6 +4810,12 @@ def main():
 
     db: SportsDB = st.session_state.db
     worker: ESPNWorker = st.session_state.worker
+
+    # ── Seed default admin credentials (hashed) on first run ──────────────
+    if not db.get_config('admin_password', ''):
+        db.update_config('admin_password', _ADMIN_PW_HASH)
+    if not db.get_config('admin_pin', ''):
+        db.update_config('admin_pin', _ADMIN_PIN_HASH)
 
     # ── LANDING PAGE GATE ─────────────────────────────────
     if not st.session_state.get('app_started', False):
@@ -5053,6 +5068,71 @@ def main():
                 st.markdown(f"**{heading}**")
                 st.markdown(f"> {body}")
                 st.markdown("")
+
+    def _render_admin_gate(gate_key: str) -> bool:
+        """Two-step admin auth (password → PIN). Returns True when fully authenticated."""
+        if st.session_state.get('admin_authed', False):
+            return True
+        st.subheader("🔒 Admin Access Required")
+        _now_g = time.time()
+        _locked_until_g = st.session_state.get('_pin_locked_until', 0.0)
+        _attempts_g = st.session_state.get('_pin_attempts', 0)
+        if _now_g < _locked_until_g:
+            _wait_g = int(_locked_until_g - _now_g)
+            st.error(f"🔒 Too many failed attempts. Try again in {_wait_g}s.")
+            return False
+        _pw_ok_g = st.session_state.get('_admin_pw_ok', False)
+        _gc, _ = st.columns([2, 3])
+        if not _pw_ok_g:
+            st.caption("Step 1 of 2 — enter the admin password")
+            with _gc:
+                _pw_in = st.text_input(
+                    "Admin Password", type='password', key=f'{gate_key}_pw')
+                if _attempts_g > 0:
+                    st.caption(f"⚠️ {5 - _attempts_g} attempt(s) remaining before lockout.")
+                if st.button("▶ Continue", key=f'{gate_key}_pw_btn'):
+                    _stored_pw = db.get_config('admin_password', _ADMIN_PW_HASH)
+                    if hmac.compare_digest(
+                            hashlib.sha256(_pw_in.encode()).hexdigest(), _stored_pw):
+                        st.session_state['_admin_pw_ok'] = True
+                        st.session_state['_pin_attempts'] = 0
+                        st.rerun()
+                    else:
+                        _attempts_g += 1
+                        st.session_state['_pin_attempts'] = _attempts_g
+                        if _attempts_g >= 5:
+                            st.session_state['_pin_locked_until'] = time.time() + 300
+                            st.session_state['_pin_attempts'] = 0
+                            st.error("🔒 Too many failed attempts. Locked for 5 minutes.")
+                        else:
+                            st.error(
+                                f"Incorrect password. {5 - _attempts_g} attempt(s) remaining.")
+        else:
+            st.caption("Step 2 of 2 — enter the admin PIN")
+            with _gc:
+                _pin_in = st.text_input(
+                    "Admin PIN", type='password', key=f'{gate_key}_pin')
+                if _attempts_g > 0:
+                    st.caption(f"⚠️ {5 - _attempts_g} attempt(s) remaining before lockout.")
+                if st.button("🔓 Unlock", key=f'{gate_key}_pin_btn'):
+                    _stored_pin = db.get_config('admin_pin', _ADMIN_PIN_HASH)
+                    if hmac.compare_digest(
+                            hashlib.sha256(_pin_in.encode()).hexdigest(), _stored_pin):
+                        st.session_state['admin_authed'] = True
+                        st.session_state['_admin_pw_ok'] = False
+                        st.session_state['_pin_attempts'] = 0
+                        st.rerun()
+                    else:
+                        _attempts_g += 1
+                        st.session_state['_pin_attempts'] = _attempts_g
+                        if _attempts_g >= 5:
+                            st.session_state['_pin_locked_until'] = time.time() + 300
+                            st.session_state['_pin_attempts'] = 0
+                            st.error("🔒 Too many failed attempts. Locked for 5 minutes.")
+                        else:
+                            st.error(
+                                f"Incorrect PIN. {5 - _attempts_g} attempt(s) remaining.")
+        return False
 
     # ── TABS ──────────────────────────────────────────────────
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs([
@@ -7461,39 +7541,8 @@ def main():
     # ── TAB 7: NETWORK / COORDINATOR ─────────────────────────
     with tab7:
         _render_how_it_works('network')
-        _auth_t6 = st.session_state.get('admin_authed', False)
-        _pin_t6  = db.get_config('admin_pin', '')
-        if not _auth_t6:
-            st.subheader("🔒 Admin Access Required")
-            _now_t6 = time.time()
-            _locked_until_t6 = st.session_state.get('_pin_locked_until', 0.0)
-            _attempts_t6 = st.session_state.get('_pin_attempts', 0)
-            if _now_t6 < _locked_until_t6:
-                _wait_t6 = int(_locked_until_t6 - _now_t6)
-                st.error(f"🔒 Too many failed attempts. Try again in {_wait_t6}s.")
-            else:
-                _t6_gc, _ = st.columns([2, 3])
-                with _t6_gc:
-                    _t6_entered = st.text_input(
-                        "Admin PIN", type='password', key='t6_pin_input')
-                    if _attempts_t6 > 0:
-                        st.caption(f"⚠️ {5 - _attempts_t6} attempt(s) remaining before lockout.")
-                    if st.button("🔓 Unlock", key='t6_pin_btn'):
-                        if not _pin_t6:
-                            st.error("No admin PIN set. Configure one in the 🛠 Admin Panel tab.")
-                        elif hmac.compare_digest(_t6_entered, _pin_t6):
-                            st.session_state['admin_authed'] = True
-                            st.session_state['_pin_attempts'] = 0
-                            st.rerun()
-                        else:
-                            _attempts_t6 += 1
-                            st.session_state['_pin_attempts'] = _attempts_t6
-                            if _attempts_t6 >= 5:
-                                st.session_state['_pin_locked_until'] = time.time() + 300
-                                st.session_state['_pin_attempts'] = 0
-                                st.error("🔒 Too many failed attempts. Locked for 5 minutes.")
-                            else:
-                                st.error(f"Incorrect PIN. {5 - _attempts_t6} attempt(s) remaining.")
+        if not _render_admin_gate('t6'):
+            st.stop()
         else:
             st.subheader("Distributed Fetch Network")
             st.caption(
@@ -8801,39 +8850,8 @@ def main():
 
     # ── TAB 9: RAW INSPECTOR ───────────────────────────────
     with tab9:
-        _auth_t8 = st.session_state.get('admin_authed', False)
-        _pin_t8  = db.get_config('admin_pin', '')
-        if not _auth_t8:
-            st.subheader("🔒 Admin Access Required")
-            _now_t8 = time.time()
-            _locked_until_t8 = st.session_state.get('_pin_locked_until', 0.0)
-            _attempts_t8 = st.session_state.get('_pin_attempts', 0)
-            if _now_t8 < _locked_until_t8:
-                _wait_t8 = int(_locked_until_t8 - _now_t8)
-                st.error(f"🔒 Too many failed attempts. Try again in {_wait_t8}s.")
-            else:
-                _t8_gc, _ = st.columns([2, 3])
-                with _t8_gc:
-                    _t8_entered = st.text_input(
-                        "Admin PIN", type='password', key='t8_pin_input')
-                    if _attempts_t8 > 0:
-                        st.caption(f"⚠️ {5 - _attempts_t8} attempt(s) remaining before lockout.")
-                    if st.button("🔓 Unlock", key='t8_pin_btn'):
-                        if not _pin_t8:
-                            st.error("No admin PIN set. Configure one in the 🛠 Admin Panel tab.")
-                        elif hmac.compare_digest(_t8_entered, _pin_t8):
-                            st.session_state['admin_authed'] = True
-                            st.session_state['_pin_attempts'] = 0
-                            st.rerun()
-                        else:
-                            _attempts_t8 += 1
-                            st.session_state['_pin_attempts'] = _attempts_t8
-                            if _attempts_t8 >= 5:
-                                st.session_state['_pin_locked_until'] = time.time() + 300
-                                st.session_state['_pin_attempts'] = 0
-                                st.error("🔒 Too many failed attempts. Locked for 5 minutes.")
-                            else:
-                                st.error(f"Incorrect PIN. {5 - _attempts_t8} attempt(s) remaining.")
+        if not _render_admin_gate('t8'):
+            st.stop()
         else:
             st.subheader("Raw JSON Inspector")
             st.caption("Explore the full JSON structure returned by ESPN for any endpoint.")
@@ -8997,289 +9015,283 @@ def main():
             "Manage and delete published views."
         )
 
-        # Simple admin PIN gate — configurable via config DB
-        _admin_pin_stored = db.get_config('admin_pin', '')
-        if not _admin_pin_stored:
-            # First-time setup: set a PIN
-            st.warning("⚠️ No admin PIN configured. Set one below (you'll use it to log in).")
-            _ap_c1, _ap_c2 = st.columns(2)
-            with _ap_c1:
-                _new_pin = st.text_input(
-                    "Set Admin PIN", type='password', key='admin_set_pin')
-            with _ap_c2:
-                st.write("")
-                st.write("")
-                if st.button("Set PIN", key='admin_set_pin_btn'):
-                    if len(_new_pin) >= 6:
-                        db.update_config('admin_pin', _new_pin)
-                        st.success("PIN set! Refresh and log in.")
-                        st.rerun()
-                    else:
-                        st.error("PIN must be at least 6 characters.")
+        if not _render_admin_gate('t10'):
+            st.stop()
         else:
-            if 'admin_authed' not in st.session_state:
+            st.success("✅ Logged in as Admin")
+            if st.button("🔒 Log out", key='admin_logout'):
                 st.session_state['admin_authed'] = False
+                st.session_state['_admin_pw_ok'] = False
+                st.rerun()
 
-            if not st.session_state['admin_authed']:
-                _now_t10 = time.time()
-                _locked_until_t10 = st.session_state.get('_pin_locked_until', 0.0)
-                _attempts_t10 = st.session_state.get('_pin_attempts', 0)
-                if _now_t10 < _locked_until_t10:
-                    _wait_t10 = int(_locked_until_t10 - _now_t10)
-                    st.error(f"🔒 Too many failed attempts. Try again in {_wait_t10}s.")
-                else:
-                    _ap_col, _ = st.columns([2, 3])
-                    with _ap_col:
-                        _entered = st.text_input(
-                            "Admin PIN", type='password', key='admin_enter_pin')
-                        if _attempts_t10 > 0:
-                            st.caption(f"⚠️ {5 - _attempts_t10} attempt(s) remaining before lockout.")
-                        if st.button("🔓 Login", key='admin_login_btn'):
-                            if hmac.compare_digest(_entered, _admin_pin_stored):
-                                st.session_state['admin_authed'] = True
-                                st.session_state['_pin_attempts'] = 0
-                                st.rerun()
-                            else:
-                                _attempts_t10 += 1
-                                st.session_state['_pin_attempts'] = _attempts_t10
-                                if _attempts_t10 >= 5:
-                                    st.session_state['_pin_locked_until'] = time.time() + 300
-                                    st.session_state['_pin_attempts'] = 0
-                                    st.error("🔒 Too many failed attempts. Locked for 5 minutes.")
-                                else:
-                                    st.error(f"Incorrect PIN. {5 - _attempts_t10} attempt(s) remaining.")
-            else:
-                st.success("✅ Logged in as Admin")
-                if st.button("🔒 Log out", key='admin_logout'):
-                    st.session_state['admin_authed'] = False
-                    st.rerun()
+            st.divider()
 
-                st.divider()
-
-                # ── Daily Auto-Sync ────────────────────────────
-                st.markdown("#### 🔁 Daily Auto-Sync")
-                st.caption(
-                    "Automatically fetch all data types (scoreboard, teams, news, rankings) "
-                    "for every active league once every 24 hours. "
-                    "The last sync time is stored in the database."
-                )
-                _adm_active_eps = json.loads(db.get_config('active_endpoints', '[]'))
-                _last_daily_str = db.get_config('last_daily_sync', '')
-                _daily_interval_h = int(db.get_config('daily_sync_interval_h', '24'))
-
-                if _last_daily_str:
-                    try:
-                        _last_daily_ts = float(_last_daily_str)
-                        _since_h = (time.time() - _last_daily_ts) / 3600
-                        _next_in = max(0, _daily_interval_h - _since_h)
-                        st.info(
-                            f"Last sync: **{datetime.fromtimestamp(_last_daily_ts).strftime('%Y-%m-%d %H:%M')}**"
-                            f"  ·  Next sync due in **{_next_in:.1f}h**"
-                            f"  ·  Interval: every **{_daily_interval_h}h**"
+            # ── Change credentials ─────────────────────────────
+            st.markdown("#### 🔑 Change Admin Credentials")
+            _cred_c1, _cred_c2 = st.columns(2)
+            with _cred_c1:
+                _chg_pw = st.text_input(
+                    "New Password (leave blank to keep)", type='password', key='adm_chg_pw')
+                _chg_pw2 = st.text_input(
+                    "Confirm New Password", type='password', key='adm_chg_pw2')
+                if st.button("💾 Save Password", key='adm_save_pw'):
+                    if not _chg_pw:
+                        st.error("Password cannot be empty.")
+                    elif _chg_pw != _chg_pw2:
+                        st.error("Passwords do not match.")
+                    elif len(_chg_pw) < 8:
+                        st.error("Password must be at least 8 characters.")
+                    else:
+                        db.update_config(
+                            'admin_password',
+                            hashlib.sha256(_chg_pw.encode()).hexdigest()
                         )
-                    except Exception:
-                        st.info("Last sync time unavailable.")
-                else:
-                    st.info("No daily sync has run yet.")
+                        st.success("Password updated. You will need it on next login.")
+            with _cred_c2:
+                _chg_pin = st.text_input(
+                    "New PIN (leave blank to keep)", type='password', key='adm_chg_pin')
+                _chg_pin2 = st.text_input(
+                    "Confirm New PIN", type='password', key='adm_chg_pin2')
+                if st.button("💾 Save PIN", key='adm_save_pin'):
+                    if not _chg_pin:
+                        st.error("PIN cannot be empty.")
+                    elif _chg_pin != _chg_pin2:
+                        st.error("PINs do not match.")
+                    elif len(_chg_pin) < 4:
+                        st.error("PIN must be at least 4 characters.")
+                    else:
+                        db.update_config(
+                            'admin_pin',
+                            hashlib.sha256(_chg_pin.encode()).hexdigest()
+                        )
+                        st.success("PIN updated. You will need it on next login.")
 
-                _adm_da_c1, _adm_da_c2, _adm_da_c3 = st.columns([2, 2, 3])
-                with _adm_da_c1:
-                    _new_interval = st.number_input(
-                        "Sync interval (hours)", min_value=1, max_value=168,
-                        value=_daily_interval_h, step=1, key='adm_sync_interval'
+            st.divider()
+
+            # ── Daily Auto-Sync ────────────────────────────
+            st.markdown("#### 🔁 Daily Auto-Sync")
+            st.caption(
+                "Automatically fetch all data types (scoreboard, teams, news, rankings) "
+                "for every active league once every 24 hours. "
+                "The last sync time is stored in the database."
+            )
+            _adm_active_eps = json.loads(db.get_config('active_endpoints', '[]'))
+            _last_daily_str = db.get_config('last_daily_sync', '')
+            _daily_interval_h = int(db.get_config('daily_sync_interval_h', '24'))
+
+            if _last_daily_str:
+                try:
+                    _last_daily_ts = float(_last_daily_str)
+                    _since_h = (time.time() - _last_daily_ts) / 3600
+                    _next_in = max(0, _daily_interval_h - _since_h)
+                    st.info(
+                        f"Last sync: **{datetime.fromtimestamp(_last_daily_ts).strftime('%Y-%m-%d %H:%M')}**"
+                        f"  ·  Next sync due in **{_next_in:.1f}h**"
+                        f"  ·  Interval: every **{_daily_interval_h}h**"
                     )
-                    if st.button("💾 Save Interval", key='adm_save_interval'):
-                        db.update_config('daily_sync_interval_h', str(_new_interval))
-                        st.success("Saved!")
-                        st.rerun()
-                with _adm_da_c2:
-                    st.write("")
-                    st.write("")
-                    if st.button("▶ Run Full Sync Now", key='adm_run_sync', type='primary'):
-                        if not _adm_active_eps:
-                            st.warning("No active leagues configured. Add leagues in the sidebar first.")
-                        else:
-                            _sync_log = []
-                            with st.spinner(f"Syncing {len(_adm_active_eps)} league(s) across all data types…"):
-                                for _ep_s in _adm_active_eps:
-                                    _cat_s, _spt_s = _ep_s.split('/')
-                                    for _et_s in ['scoreboard', 'teams', 'news', 'rankings']:
-                                        if not EndpointRegistry.get_url(_cat_s, _spt_s, _et_s):
-                                            continue
-                                        try:
-                                            worker.fetch_and_process(
-                                                _cat_s, _spt_s, _et_s, force_refresh=True
-                                            )
-                                            _sync_log.append(f"✅ {_ep_s}/{_et_s}")
-                                        except Exception as _se:
-                                            _sync_log.append(f"❌ {_ep_s}/{_et_s}: {_se}")
-                            db.update_config('last_daily_sync', str(time.time()))
-                            _fails = [l for l in _sync_log if l.startswith('❌')]
-                            if _fails:
-                                st.warning(
-                                    f"Sync complete with {len(_fails)} error(s):\n"
-                                    + '\n'.join(_fails[:5])
-                                )
-                            else:
-                                st.success(f"✅ Full sync complete — {len(_sync_log)} endpoint(s) refreshed.")
-                            st.rerun()
-                with _adm_da_c3:
-                    with st.expander("📋 What does this sync?"):
-                        st.markdown(
-                            "For **every active league** it fetches:\n"
-                            "- **Scoreboard** — latest game scores, status, leaders\n"
-                            "- **Teams** — roster metadata, colours, logos\n"
-                            "- **News** — latest ESPN articles\n"
-                            "- **Rankings** — AP / Coaches poll (where available)\n\n"
-                            "Data is written to the local SQLite database so all tabs "
-                            "have fresh information without needing manual fetches."
-                        )
+                except Exception:
+                    st.info("Last sync time unavailable.")
+            else:
+                st.info("No daily sync has run yet.")
 
-                # Auto-trigger check (runs on every page load while admin is logged in)
-                if _adm_active_eps and _last_daily_str:
-                    try:
-                        _auto_ts = float(_last_daily_str)
-                        _hours_elapsed = (time.time() - _auto_ts) / 3600
-                        if _hours_elapsed >= _daily_interval_h:
-                            st.toast(
-                                f"⏰ Auto-sync triggered ({_hours_elapsed:.1f}h since last sync)…",
-                                icon="🔄"
-                            )
-                            for _ep_a in _adm_active_eps:
-                                _cat_a, _spt_a = _ep_a.split('/')
-                                for _et_a in ['scoreboard', 'teams', 'news', 'rankings']:
-                                    if not EndpointRegistry.get_url(_cat_a, _spt_a, _et_a):
+            _adm_da_c1, _adm_da_c2, _adm_da_c3 = st.columns([2, 2, 3])
+            with _adm_da_c1:
+                _new_interval = st.number_input(
+                    "Sync interval (hours)", min_value=1, max_value=168,
+                    value=_daily_interval_h, step=1, key='adm_sync_interval'
+                )
+                if st.button("💾 Save Interval", key='adm_save_interval'):
+                    db.update_config('daily_sync_interval_h', str(_new_interval))
+                    st.success("Saved!")
+                    st.rerun()
+            with _adm_da_c2:
+                st.write("")
+                st.write("")
+                if st.button("▶ Run Full Sync Now", key='adm_run_sync', type='primary'):
+                    if not _adm_active_eps:
+                        st.warning("No active leagues configured. Add leagues in the sidebar first.")
+                    else:
+                        _sync_log = []
+                        with st.spinner(f"Syncing {len(_adm_active_eps)} league(s) across all data types…"):
+                            for _ep_s in _adm_active_eps:
+                                _cat_s, _spt_s = _ep_s.split('/')
+                                for _et_s in ['scoreboard', 'teams', 'news', 'rankings']:
+                                    if not EndpointRegistry.get_url(_cat_s, _spt_s, _et_s):
                                         continue
                                     try:
                                         worker.fetch_and_process(
-                                            _cat_a, _spt_a, _et_a, force_refresh=True
+                                            _cat_s, _spt_s, _et_s, force_refresh=True
                                         )
-                                    except Exception:
-                                        pass
-                            db.update_config('last_daily_sync', str(time.time()))
-                    except Exception:
-                        pass
-
-                st.divider()
-
-                _cv_dir10 = os.path.join(
-                    os.path.dirname(os.path.abspath(__file__)), 'custom_views')
-                _cv_pub10 = os.path.join(_cv_dir10, 'public')
-                os.makedirs(_cv_pub10, exist_ok=True)
-
-                # Upload a custom view file
-                st.markdown("#### Upload / Publish a Custom View")
-                _up_file = st.file_uploader(
-                    "Upload a `.json` custom view file",
-                    type=['json'],
-                    key='admin_upload',
-                )
-                if _up_file is not None:
-                    try:
-                        _up_data = json.loads(_up_file.read())
-                        if 'name' not in _up_data:
-                            st.error(
-                                "Invalid view file — must have a `name` field."
+                                        _sync_log.append(f"✅ {_ep_s}/{_et_s}")
+                                    except Exception as _se:
+                                        _sync_log.append(f"❌ {_ep_s}/{_et_s}: {_se}")
+                        db.update_config('last_daily_sync', str(time.time()))
+                        _fails = [l for l in _sync_log if l.startswith('❌')]
+                        if _fails:
+                            st.warning(
+                                f"Sync complete with {len(_fails)} error(s):\n"
+                                + '\n'.join(_fails[:5])
                             )
                         else:
-                            _safe10 = "".join(
-                                c if c.isalnum() or c in '._- ' else '_'
-                                for c in _up_data['name']
-                            ).replace(' ', '_')[:60]
-                            _pub_path = os.path.join(_cv_pub10, f"{_safe10}.json")
-                            with open(_pub_path, 'w', encoding='utf-8') as _pf:
-                                json.dump(_up_data, _pf, indent=2)
-                            st.success(
-                                f"✅ Published **{_up_data['name']}** — "
-                                "users can now load it from the 📋 Custom Views tab."
-                            )
-                    except Exception as _ue:
-                        st.error(f"Failed to parse file: {_ue}")
+                            st.success(f"✅ Full sync complete — {len(_sync_log)} endpoint(s) refreshed.")
+                        st.rerun()
+            with _adm_da_c3:
+                with st.expander("📋 What does this sync?"):
+                    st.markdown(
+                        "For **every active league** it fetches:\n"
+                        "- **Scoreboard** — latest game scores, status, leaders\n"
+                        "- **Teams** — roster metadata, colours, logos\n"
+                        "- **News** — latest ESPN articles\n"
+                        "- **Rankings** — AP / Coaches poll (where available)\n\n"
+                        "Data is written to the local SQLite database so all tabs "
+                        "have fresh information without needing manual fetches."
+                    )
 
-                st.divider()
+            # Auto-trigger check (runs on every page load while admin is logged in)
+            if _adm_active_eps and _last_daily_str:
+                try:
+                    _auto_ts = float(_last_daily_str)
+                    _hours_elapsed = (time.time() - _auto_ts) / 3600
+                    if _hours_elapsed >= _daily_interval_h:
+                        st.toast(
+                            f"⏰ Auto-sync triggered ({_hours_elapsed:.1f}h since last sync)…",
+                            icon="🔄"
+                        )
+                        for _ep_a in _adm_active_eps:
+                            _cat_a, _spt_a = _ep_a.split('/')
+                            for _et_a in ['scoreboard', 'teams', 'news', 'rankings']:
+                                if not EndpointRegistry.get_url(_cat_a, _spt_a, _et_a):
+                                    continue
+                                try:
+                                    worker.fetch_and_process(
+                                        _cat_a, _spt_a, _et_a, force_refresh=True
+                                    )
+                                except Exception:
+                                    pass
+                        db.update_config('last_daily_sync', str(time.time()))
+                except Exception:
+                    pass
 
-                # Manage published views
-                st.markdown("#### Published Views")
-                _pub10_files = sorted(
-                    [f for f in os.listdir(_cv_pub10) if f.endswith('.json')
-                     and os.path.isfile(os.path.join(_cv_pub10, f))]
-                )
-                if not _pub10_files:
-                    st.info("No public views published yet. Upload one above.")
-                else:
-                    for _pf_name in _pub10_files:
-                        _pf_path = os.path.join(_cv_pub10, _pf_name)
-                        try:
-                            with open(_pf_path, encoding='utf-8') as _pff:
-                                _pf_cfg = json.load(_pff)
-                        except Exception:
-                            _pf_cfg = {}
-                        _pfc1, _pfc2, _pfc3 = st.columns([4, 2, 1])
-                        with _pfc1:
-                            st.markdown(
-                                f"**{_pf_cfg.get('name', _pf_name)}**  "
-                                f"·  `{_pf_cfg.get('sport_key','')}` "
-                                f"·  {_pf_cfg.get('data_source','')} "
-                                f"·  {_pf_cfg.get('chart_type','table')}"
-                            )
-                            if _pf_cfg.get('description'):
-                                st.caption(_pf_cfg['description'])
-                        with _pfc2:
-                            _dl_bytes = json.dumps(_pf_cfg, indent=2).encode()
-                            st.download_button(
-                                "⬇ Download",
-                                data=_dl_bytes,
-                                file_name=_pf_name,
-                                mime='application/json',
-                                key=f'adm_dl_{_pf_name}',
-                            )
-                        with _pfc3:
-                            if st.button("🗑", key=f'adm_del_{_pf_name}',
-                                         help="Delete this public view"):
-                                os.remove(_pf_path)
-                                st.success(f"Deleted {_pf_name}")
-                                st.rerun()
-                        st.divider()
+            st.divider()
 
-                # Personal saved views management
-                st.markdown("#### Personal Saved Views")
-                _cv10_files = sorted(
-                    [f for f in os.listdir(_cv_dir10) if f.endswith('.json')
-                     and os.path.isfile(os.path.join(_cv_dir10, f))]
-                )
-                if not _cv10_files:
-                    st.info("No personal views saved yet.")
-                else:
-                    for _cvf10 in _cv10_files:
-                        _cvf10_path = os.path.join(_cv_dir10, _cvf10)
-                        try:
-                            with open(_cvf10_path, encoding='utf-8') as _f10:
-                                _cfg10 = json.load(_f10)
-                        except Exception:
-                            _cfg10 = {}
-                        _cv10c1, _cv10c2, _cv10c3 = st.columns([4, 2, 1])
-                        with _cv10c1:
-                            st.write(
-                                f"**{_cfg10.get('name', _cvf10)}**  "
-                                f"·  `{_cfg10.get('sport_key','')}` "
-                                f"·  {_cfg10.get('data_source','')}"
+            _cv_dir10 = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), 'custom_views')
+            _cv_pub10 = os.path.join(_cv_dir10, 'public')
+            os.makedirs(_cv_pub10, exist_ok=True)
+
+            # Upload a custom view file
+            st.markdown("#### Upload / Publish a Custom View")
+            _up_file = st.file_uploader(
+                "Upload a `.json` custom view file",
+                type=['json'],
+                key='admin_upload',
+            )
+            if _up_file is not None:
+                try:
+                    _up_data = json.loads(_up_file.read())
+                    if 'name' not in _up_data:
+                        st.error(
+                            "Invalid view file — must have a `name` field."
+                        )
+                    else:
+                        _safe10 = "".join(
+                            c if c.isalnum() or c in '._- ' else '_'
+                            for c in _up_data['name']
+                        ).replace(' ', '_')[:60]
+                        _pub_path = os.path.join(_cv_pub10, f"{_safe10}.json")
+                        with open(_pub_path, 'w', encoding='utf-8') as _pf:
+                            json.dump(_up_data, _pf, indent=2)
+                        st.success(
+                            f"✅ Published **{_up_data['name']}** — "
+                            "users can now load it from the 📋 Custom Views tab."
+                        )
+                except Exception as _ue:
+                    st.error(f"Failed to parse file: {_ue}")
+
+            st.divider()
+
+            # Manage published views
+            st.markdown("#### Published Views")
+            _pub10_files = sorted(
+                [f for f in os.listdir(_cv_pub10) if f.endswith('.json')
+                 and os.path.isfile(os.path.join(_cv_pub10, f))]
+            )
+            if not _pub10_files:
+                st.info("No public views published yet. Upload one above.")
+            else:
+                for _pf_name in _pub10_files:
+                    _pf_path = os.path.join(_cv_pub10, _pf_name)
+                    try:
+                        with open(_pf_path, encoding='utf-8') as _pff:
+                            _pf_cfg = json.load(_pff)
+                    except Exception:
+                        _pf_cfg = {}
+                    _pfc1, _pfc2, _pfc3 = st.columns([4, 2, 1])
+                    with _pfc1:
+                        st.markdown(
+                            f"**{_pf_cfg.get('name', _pf_name)}**  "
+                            f"·  `{_pf_cfg.get('sport_key','')}` "
+                            f"·  {_pf_cfg.get('data_source','')} "
+                            f"·  {_pf_cfg.get('chart_type','table')}"
+                        )
+                        if _pf_cfg.get('description'):
+                            st.caption(_pf_cfg['description'])
+                    with _pfc2:
+                        _dl_bytes = json.dumps(_pf_cfg, indent=2).encode()
+                        st.download_button(
+                            "⬇ Download",
+                            data=_dl_bytes,
+                            file_name=_pf_name,
+                            mime='application/json',
+                            key=f'adm_dl_{_pf_name}',
+                        )
+                    with _pfc3:
+                        if st.button("🗑", key=f'adm_del_{_pf_name}',
+                                     help="Delete this public view"):
+                            os.remove(_pf_path)
+                            st.success(f"Deleted {_pf_name}")
+                            st.rerun()
+                    st.divider()
+
+            # Personal saved views management
+            st.markdown("#### Personal Saved Views")
+            _cv10_files = sorted(
+                [f for f in os.listdir(_cv_dir10) if f.endswith('.json')
+                 and os.path.isfile(os.path.join(_cv_dir10, f))]
+            )
+            if not _cv10_files:
+                st.info("No personal views saved yet.")
+            else:
+                for _cvf10 in _cv10_files:
+                    _cvf10_path = os.path.join(_cv_dir10, _cvf10)
+                    try:
+                        with open(_cvf10_path, encoding='utf-8') as _f10:
+                            _cfg10 = json.load(_f10)
+                    except Exception:
+                        _cfg10 = {}
+                    _cv10c1, _cv10c2, _cv10c3 = st.columns([4, 2, 1])
+                    with _cv10c1:
+                        st.write(
+                            f"**{_cfg10.get('name', _cvf10)}**  "
+                            f"·  `{_cfg10.get('sport_key','')}` "
+                            f"·  {_cfg10.get('data_source','')}"
+                        )
+                    with _cv10c2:
+                        if st.button("📤 Publish", key=f'cv10_pub_{_cvf10}',
+                                     help="Copy to public views"):
+                            import shutil as _sh10
+                            _sh10.copy2(
+                                _cvf10_path,
+                                os.path.join(_cv_pub10, _cvf10),
                             )
-                        with _cv10c2:
-                            if st.button("📤 Publish", key=f'cv10_pub_{_cvf10}',
-                                         help="Copy to public views"):
-                                import shutil as _sh10
-                                _sh10.copy2(
-                                    _cvf10_path,
-                                    os.path.join(_cv_pub10, _cvf10),
-                                )
-                                st.success(f"Published {_cvf10}")
-                                st.rerun()
-                        with _cv10c3:
-                            if st.button("🗑", key=f'cv10_del_{_cvf10}',
-                                         help="Delete personal view"):
-                                os.remove(_cvf10_path)
-                                st.success(f"Deleted {_cvf10}")
-                                st.rerun()
+                            st.success(f"Published {_cvf10}")
+                            st.rerun()
+                    with _cv10c3:
+                        if st.button("🗑", key=f'cv10_del_{_cvf10}',
+                                     help="Delete personal view"):
+                            os.remove(_cvf10_path)
+                            st.success(f"Deleted {_cvf10}")
+                            st.rerun()
 
     # ── TAB 12: SUPPORT / DONATE ───────────────────────────────
     with tab12:
