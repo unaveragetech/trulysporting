@@ -1646,6 +1646,10 @@ class SportsDB:
                 vals = ath.get('stats', [])
                 if not name:
                     continue
+                # Synthetic ID prevents UNIQUE(event_id,'',category) collision
+                # when ESPN omits the athlete ID — gives each unique name its own key
+                if not pid:
+                    pid = '_pn_' + name.lower().replace(' ', '_')[:30]
                 rows.append((
                     event_id, game_date, sport_key, team_abbr,
                     pid, name, hs,
@@ -1655,8 +1659,9 @@ class SportsDB:
                     now,
                 ))
         if rows:
+            # INSERT OR REPLACE so re-running after a fix updates stale rows
             c.executemany("""
-                INSERT OR IGNORE INTO player_game_stats
+                INSERT OR REPLACE INTO player_game_stats
                 (event_id, game_date, sport_key, team_abbr, player_id,
                  player_name, headshot_url, category, stat_labels, stat_values, fetched_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)
@@ -1664,8 +1669,40 @@ class SportsDB:
             conn.commit()
         conn.close()
 
+    def repopulate_player_game_stats(self) -> int:
+        """Re-run _flatten_player_stats for every game_summary row whose event_id
+        has no entries yet in player_game_stats.  Returns count of events processed."""
+        conn = self.get_connection()
+        rows = conn.execute("""
+            SELECT gs.event_id, gs.sport_key, gs.player_stats_json,
+                   COALESCE(h.event_date, '')
+            FROM game_summaries gs
+            LEFT JOIN game_history h ON h.event_id = gs.event_id
+            WHERE gs.player_stats_json NOT IN ('[]', 'null', '')
+              AND gs.player_stats_json IS NOT NULL
+              AND gs.event_id NOT IN (
+                  SELECT DISTINCT event_id FROM player_game_stats
+              )
+        """).fetchall()
+        conn.close()
+        count = 0
+        for eid, sk, ps_json, gdate in rows:
+            try:
+                ps = json.loads(ps_json or '[]')
+                if ps:
+                    self._flatten_player_stats(eid, sk, gdate or '', ps)
+                    count += 1
+            except Exception:
+                pass
+        return count
+
     def get_game_summary(self, event_id: str) -> Optional[Dict]:
-        """Return the stored game summary dict for event_id, or None if not found."""
+        """Return the stored game summary dict for event_id, or None if not found.
+
+        Uses key-based access from sqlite3.Row (row_factory is already set in
+        get_connection) so column order in SELECT * never matters — no off-by-one
+        mapping between table columns and a hardcoded list.
+        """
         conn = self.get_connection()
         row = conn.execute(
             "SELECT * FROM game_summaries WHERE event_id=?", (str(event_id),)
@@ -1673,28 +1710,36 @@ class SportsDB:
         conn.close()
         if row is None:
             return None
-        cols = [
-            'event_id', 'sport_key', 'home_stats_json', 'away_stats_json',
-            'leaders_json', 'last_five_home', 'last_five_away', 'injuries_json',
-            'standings_json', 'venue_name', 'venue_city', 'odds_json',
-            'player_stats_json', 'team_stats_full_json', 'officials_json',
-            'videos_json', 'win_prob_json', 'scoring_plays_json', 'pickcenter_json',
-            'home_abbr', 'away_abbr', 'fetched_at',
-        ]
-        return dict(zip(cols, row))
+        # sqlite3.Row supports key access; convert to plain dict by column name.
+        return {k: row[k] for k in row.keys()}
 
-    def get_player_game_log(self, sport_key: str, player_name: str) -> pd.DataFrame:
-        """Return per-game stat rows for a named player in a sport."""
+    def get_player_game_log(self, sport_key: str, player_name: str,
+                             player_id: str = '') -> pd.DataFrame:
+        """Return per-game stat rows for a player.  Queries by player_id first
+        (exact match) then falls back to display-name substring search so both
+        properly-ID'd rows and legacy synthetic-ID rows are found."""
         conn = self.get_connection()
-        df = pd.read_sql_query("""
-            SELECT p.event_id, p.game_date, p.team_abbr, p.player_name,
-                   p.category, p.stat_labels, p.stat_values, p.headshot_url,
-                   h.home_team, h.away_team, h.home_score, h.away_score, h.status
-            FROM player_game_stats p
-            LEFT JOIN game_history h ON h.event_id = p.event_id
-            WHERE p.sport_key=? AND LOWER(p.player_name) LIKE ?
-            ORDER BY p.game_date DESC
-        """, conn, params=(sport_key, f'%{player_name.lower()}%'))
+        if player_id:
+            df = pd.read_sql_query("""
+                SELECT p.event_id, p.game_date, p.team_abbr, p.player_name,
+                       p.category, p.stat_labels, p.stat_values, p.headshot_url,
+                       h.home_team, h.away_team, h.home_score, h.away_score, h.status
+                FROM player_game_stats p
+                LEFT JOIN game_history h ON h.event_id = p.event_id
+                WHERE p.sport_key=?
+                  AND (p.player_id=? OR LOWER(p.player_name) LIKE ?)
+                ORDER BY p.game_date DESC
+            """, conn, params=(sport_key, str(player_id), f'%{player_name.lower()}%'))
+        else:
+            df = pd.read_sql_query("""
+                SELECT p.event_id, p.game_date, p.team_abbr, p.player_name,
+                       p.category, p.stat_labels, p.stat_values, p.headshot_url,
+                       h.home_team, h.away_team, h.home_score, h.away_score, h.status
+                FROM player_game_stats p
+                LEFT JOIN game_history h ON h.event_id = p.event_id
+                WHERE p.sport_key=? AND LOWER(p.player_name) LIKE ?
+                ORDER BY p.game_date DESC
+            """, conn, params=(sport_key, f'%{player_name.lower()}%'))
         conn.close()
         return df
 
@@ -2126,6 +2171,255 @@ class SportsDB:
         n = c.fetchone()[0]
         conn.close()
         return n > 0
+
+    def get_pbp_derived_stats(self, event_id: str) -> list:
+        """Parse stored PBP play texts to produce per-player cumulative stats.
+
+        Returns a list in the same format as parse_game_summary 'player_stats'
+        so the Players tab render code can use it as a drop-in fallback when
+        the boxscore player_stats_json is missing or empty (e.g. NFL games stored
+        before schema additions, or games where ESPN omits the boxscore.players block).
+
+        Patterns are tuned for NFL play texts but fall back gracefully for other
+        sports — if no patterns match the plays will simply remain uncounted.
+        """
+        import re as _re
+        from collections import defaultdict as _dd
+
+        conn = self.get_connection()
+        rows = conn.execute(
+            """SELECT play_type, play_text, team_abbr
+               FROM play_by_play
+               WHERE event_id=?
+               ORDER BY sequence_num""",
+            (str(event_id),)
+        ).fetchall()
+        conn.close()
+
+        if not rows:
+            return []
+
+        # ── accumulators (keyed by abbreviated name e.g. "S.Darnold") ──
+        passing  = _dd(lambda: {'team': '', 'att': 0, 'cmp': 0, 'yds': 0,
+                                 'td': 0, 'int': 0, 'sacked': 0})
+        rushing  = _dd(lambda: {'team': '', 'car': 0, 'yds': 0, 'td': 0})
+        receiving = _dd(lambda: {'team': '', 'rec': 0, 'yds': 0, 'td': 0})
+        defense   = _dd(lambda: {'team': '', 'sacks': 0.0, 'int': 0, 'int_yds': 0})
+        kicking   = _dd(lambda: {'team': '', 'fg_made': 0, 'fg_att': 0, 'long': 0})
+
+        # abbreviated player name pattern — e.g. "S.Darnold", "K.Walker III"
+        _P = r'([A-Z]\.[A-Za-z\'\-]+(?:\s+[A-Za-z\'\-]+(?:\s+[A-Z]{1,3})?)?)'
+
+        def _yards(txt):
+            m = _re.search(r'for (-?\d+) yards?', txt)
+            return int(m.group(1)) if m else 0
+
+        for play_type, txt, team in rows:
+            if not txt:
+                continue
+
+            # strip formation prefix like "(Shotgun) " or "(No Huddle, Shotgun) "
+            clean = _re.sub(r'^\([^)]+\)\s+', '', txt)
+
+            # ── PASSING ──────────────────────────────────────────────────
+            if play_type in ('Pass Reception', 'Pass Incompletion',
+                             'Passing Touchdown',
+                             'Pass Interception Return',
+                             'Interception Return Touchdown',
+                             'Sack', 'Sack Opp Fumble Recovery'):
+
+                m_pr = _re.match(_P + r'\s+(?:pass|sacked)', clean)
+                if not m_pr:
+                    continue
+                passer = m_pr.group(1)
+                passing[passer]['team'] = passing[passer]['team'] or team
+
+                if play_type in ('Pass Reception', 'Pass Incompletion',
+                                 'Passing Touchdown',
+                                 'Pass Interception Return',
+                                 'Interception Return Touchdown'):
+                    passing[passer]['att'] += 1
+
+                if play_type == 'Pass Reception':
+                    passing[passer]['cmp'] += 1
+                    passing[passer]['yds'] += _yards(txt)
+                    # receiver: "pass ... to R.Shaheed to NE 40 for 15 yards"
+                    mR = _re.search(
+                        r'pass\s+(?:short|deep|middle|complete to)?\s*'
+                        r'(?:left|right|middle)?\s+(?:to\s+)?' + _P, clean)
+                    if mR:
+                        rec = mR.group(1)
+                        receiving[rec]['team'] = receiving[rec]['team'] or team
+                        receiving[rec]['rec'] += 1
+                        receiving[rec]['yds'] += _yards(txt)
+
+                elif play_type == 'Passing Touchdown':
+                    passing[passer]['cmp'] += 1
+                    passing[passer]['td']  += 1
+                    passing[passer]['yds'] += _yards(txt)
+                    mR = _re.search(r'to\s+' + _P + r'\s+for\s+\d+\s+yards?', clean)
+                    if mR:
+                        rec = mR.group(1)
+                        receiving[rec]['team'] = receiving[rec]['team'] or team
+                        receiving[rec]['rec'] += 1
+                        receiving[rec]['td']  += 1
+                        receiving[rec]['yds'] += _yards(txt)
+
+                elif play_type in ('Pass Interception Return',
+                                   'Interception Return Touchdown'):
+                    passing[passer]['int'] += 1
+                    mI = _re.search(r'INTERCEPTED by\s+' + _P, txt)
+                    if mI:
+                        defp = mI.group(1)
+                        defense[defp]['team'] = defense[defp]['team'] or team
+                        defense[defp]['int'] += 1
+                        defense[defp]['int_yds'] += max(0, _yards(txt))
+
+                elif play_type in ('Sack', 'Sack Opp Fumble Recovery'):
+                    passing[passer]['sacked'] += 1
+                    mS = _re.search(r'sacked at .+? \(([^)]+)\)', txt)
+                    if mS:
+                        sackers = _re.findall(
+                            r'[A-Z]\.[A-Za-z\'\-]+(?:\s+[A-Za-z\'\-]+)?',
+                            mS.group(1))
+                        share = 1.0 / len(sackers) if sackers else 1.0
+                        for s in sackers:
+                            defense[s]['sacks'] += share
+
+            # ── RUSHING ──────────────────────────────────────────────────
+            elif play_type in ('Rush', 'Rushing Touchdown'):
+                mRu = _re.match(
+                    _P + r'\s+(?:up|left|right|ran|scrambles|rush|dive)', clean)
+                if not mRu:
+                    # try stat_yardage approach (play may not match pattern)
+                    continue
+                rusher = mRu.group(1)
+                rushing[rusher]['team'] = rushing[rusher]['team'] or team
+                rushing[rusher]['car'] += 1
+                yds_r = _yards(txt)
+                if 'no gain' in txt.lower():
+                    yds_r = 0
+                rushing[rusher]['yds'] += yds_r
+                if 'TOUCHDOWN' in txt and 'NULLIFIED' not in txt:
+                    rushing[rusher]['td'] += 1
+
+            # ── KICKING ──────────────────────────────────────────────────
+            elif play_type == 'Field Goal Good':
+                mFG = _re.match(_P + r'\s+(\d+) yard field goal is GOOD', clean)
+                if mFG:
+                    kicker = mFG.group(1)
+                    dist   = int(mFG.group(2))
+                    kicking[kicker]['team'] = kicking[kicker]['team'] or team
+                    kicking[kicker]['fg_made'] += 1
+                    kicking[kicker]['fg_att']  += 1
+                    kicking[kicker]['long'] = max(kicking[kicker]['long'], dist)
+
+            elif play_type == 'Field Goal No Good':
+                mFG = _re.match(_P + r'\s+\d+ yard field goal', clean)
+                if mFG:
+                    kicker = mFG.group(1)
+                    kicking[kicker]['team'] = kicking[kicker]['team'] or team
+                    kicking[kicker]['fg_att'] += 1
+
+        # ── assemble player_stats blocks ─────────────────────────────────
+        result = []
+
+        def _ath(name, stats_vals):
+            return {'name': name, 'id': '', 'jersey': '', 'headshot': '',
+                    'stats': stats_vals}
+
+        # Passing
+        pass_athletes = sorted(
+            [{'name': n, 'team': v['team'],
+              'stats': [f"{v['cmp']}/{v['att']}", str(v['yds']),
+                        str(round(v['yds'] / v['att'], 1)) if v['att'] else '0.0',
+                        str(v['td']), str(v['int'])]}
+             for n, v in passing.items() if v['att'] > 0],
+            key=lambda x: int(x['stats'][1]), reverse=True
+        )
+        for ath in pass_athletes:
+            result.append({
+                'team': ath['team'], 'category': 'passing',
+                'displayName': 'Passing',
+                'labels': ['C/ATT', 'YDS', 'AVG', 'TD', 'INT'],
+                'athletes': [_ath(ath['name'], ath['stats'])],
+                'totals': []
+            })
+
+        # Rushing — merge into one block per team
+        rush_athletes = sorted(
+            [{'name': n, 'team': v['team'],
+              'stats': [str(v['car']), str(v['yds']),
+                        str(round(v['yds'] / v['car'], 1)) if v['car'] else '0.0',
+                        str(v['td'])]}
+             for n, v in rushing.items() if v['car'] > 0],
+            key=lambda x: int(x['stats'][1]), reverse=True
+        )
+        if rush_athletes:
+            teams_rush = list(dict.fromkeys(a['team'] for a in rush_athletes))
+            for t in teams_rush:
+                block_aths = [_ath(a['name'], a['stats'])
+                              for a in rush_athletes if a['team'] == t]
+                result.append({'team': t, 'category': 'rushing',
+                               'displayName': 'Rushing',
+                               'labels': ['CAR', 'YDS', 'AVG', 'TD'],
+                               'athletes': block_aths, 'totals': []})
+
+        # Receiving — merge into one block per team
+        rec_athletes = sorted(
+            [{'name': n, 'team': v['team'],
+              'stats': [str(v['rec']), str(v['yds']),
+                        str(round(v['yds'] / v['rec'], 1)) if v['rec'] else '0.0',
+                        str(v['td'])]}
+             for n, v in receiving.items() if v['rec'] > 0],
+            key=lambda x: int(x['stats'][1]), reverse=True
+        )
+        if rec_athletes:
+            teams_rec = list(dict.fromkeys(a['team'] for a in rec_athletes))
+            for t in teams_rec:
+                block_aths = [_ath(a['name'], a['stats'])
+                              for a in rec_athletes if a['team'] == t]
+                result.append({'team': t, 'category': 'receiving',
+                               'displayName': 'Receiving',
+                               'labels': ['REC', 'YDS', 'AVG', 'TD'],
+                               'athletes': block_aths, 'totals': []})
+
+        # Defense (sacks + interceptions)
+        def_athletes = sorted(
+            [{'name': n, 'team': v['team'],
+              'stats': [str(v.get('sacks', 0.0)), str(v['int']), str(v['int_yds'])]}
+             for n, v in defense.items()
+             if v.get('sacks', 0) > 0 or v['int'] > 0],
+            key=lambda x: float(x['stats'][0]), reverse=True
+        )
+        if def_athletes:
+            teams_def = list(dict.fromkeys(a['team'] for a in def_athletes))
+            for t in teams_def:
+                block_aths = [_ath(a['name'], a['stats'])
+                              for a in def_athletes if a['team'] == t]
+                result.append({'team': t, 'category': 'defensive',
+                               'displayName': 'Defense (PBP)',
+                               'labels': ['SACKS', 'INT', 'INT YDS'],
+                               'athletes': block_aths, 'totals': []})
+
+        # Kicking
+        kick_athletes = sorted(
+            [{'name': n, 'team': v['team'],
+              'stats': [f"{v['fg_made']}/{v['fg_att']}", str(v['long'])]}
+             for n, v in kicking.items() if v['fg_att'] > 0],
+            key=lambda x: int(x['stats'][0].split('/')[0]), reverse=True
+        )
+        if kick_athletes:
+            teams_kick = list(dict.fromkeys(a['team'] for a in kick_athletes))
+            for t in teams_kick:
+                block_aths = [_ath(a['name'], a['stats'])
+                              for a in kick_athletes if a['team'] == t]
+                result.append({'team': t, 'category': 'kicking',
+                               'displayName': 'Kicking',
+                               'labels': ['FG', 'LONG'],
+                               'athletes': block_aths, 'totals': []})
+
+        return result
 
 
 # ─────────────────────────────────────────────────────────────
@@ -2653,11 +2947,23 @@ class ESPNWorker:
                         [{'plays': flat_plays, 'description': 'Plays'}]
                     )
 
-        # Final games only need to be fetched once — but still extract PBP from cache if missing
+        # Final games only need to be fetched once — but still extract PBP and
+        # player_game_stats from cache if they were missed on earlier runs
         if self.db.is_game_final(event_id):
             cached = self.db.get_cached_data(cache_key, 86400 * 365)
             if cached:
                 _extract_and_save_pbp(cached)
+                # Back-fill player_game_stats if this event hasn't been processed yet
+                conn_chk = self.db.get_connection()
+                _has_pgs = conn_chk.execute(
+                    'SELECT 1 FROM player_game_stats WHERE event_id=? LIMIT 1',
+                    (str(event_id),)
+                ).fetchone()
+                conn_chk.close()
+                if not _has_pgs:
+                    _sum2 = ESPNParser.parse_game_summary(cached, sport_key)
+                    if _sum2:
+                        self.db.save_game_summary(_sum2)
                 return cached
         try:
             resp = self.session.get(url, params={'event': str(event_id)}, timeout=20)
@@ -2943,9 +3249,22 @@ def render_game_detail(event_id: str, db: Any, home_abbr: str, away_abbr: str):
 
     # ── Player Stats ──────────────────────────────────────────
     with dt2:
+        # If boxscore player_stats is missing/empty, try to derive from PBP
+        _ps_source = 'boxscore'
+        if not player_stats:
+            _pbp_stats = db.get_pbp_derived_stats(event_id)
+            if _pbp_stats:
+                player_stats  = _pbp_stats
+                _ps_source    = 'pbp'
         if not player_stats:
             st.info("Player stats not yet loaded. Fetch game summary to populate.")
         else:
+            if _ps_source == 'pbp':
+                st.caption(
+                    "ℹ️ Showing stats derived from play-by-play text "
+                    "(boxscore data unavailable). Abbreviated player names "
+                    "(e.g. *S.Darnold*) are used as-is from the PBP log."
+                )
             # Category selector
             cat_names = list({c['displayName']: 1 for c in player_stats}.keys())
             sel_cat = st.selectbox("Category", cat_names, key=f"ps_cat_{event_id}")
@@ -4960,6 +5279,35 @@ def main():
         if not _pt_active_eps:
             st.info("Add leagues in the sidebar first.")
         else:
+            # ── Repopulate player stats from existing game summaries ──
+            _pt_repop_key = 'pt_repop_done'
+            _pt_repop_col1, _pt_repop_col2 = st.columns([6, 2])
+            with _pt_repop_col2:
+                if st.button(
+                    "🔄 Sync Player Stats", key="pt_repopulate",
+                    help=(
+                        "Re-processes all stored game summaries to populate "
+                        "per-player boxscore data. Run this once after fetching "
+                        "game Summaries from the Scoreboard tab."
+                    )
+                ):
+                    with st.spinner("Syncing player stats from stored summaries…"):
+                        _n_repop = db.repopulate_player_game_stats()
+                    st.success(f"Synced {_n_repop} game(s). Reload the page to see data.")
+                    st.rerun()
+            with _pt_repop_col1:
+                _pt_pgs_conn = db.get_connection()
+                _pt_pgs_count = _pt_pgs_conn.execute(
+                    "SELECT COUNT(*) FROM player_game_stats"
+                ).fetchone()[0]
+                _pt_pgs_conn.close()
+                if _pt_pgs_count == 0:
+                    st.warning(
+                        "No player boxscore data yet — click **🔄 Sync Player Stats** "
+                        "after fetching game Summaries from the Scoreboard tab."
+                    )
+                else:
+                    st.caption(f"📦 {_pt_pgs_count:,} boxscore stat rows stored across all leagues.")
             # ── Control row ──────────────────────────────────────
             _pt_r1c1, _pt_r1c2, _pt_r1c3 = st.columns([3, 2, 3])
 
@@ -5079,7 +5427,9 @@ def main():
                         )
 
                     # ── Load local DB data immediately — no ESPN API needed ─
-                    _pgs_live  = db.get_player_game_log(_pt_sport_key, _pt_sel_player)
+                    _pgs_live  = db.get_player_game_log(
+                        _pt_sport_key, _pt_sel_player, str(_pt_player_id)
+                    )
                     _pbp_live  = db.get_player_pbp_mentions(_pt_sport_key, _pt_sel_player)
                     _roster_bio = _pt_player_row.iloc[0].to_dict() if not _pt_player_row.empty else {}
 
