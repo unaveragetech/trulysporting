@@ -2491,16 +2491,9 @@ class ESPNWorker:
                                         player_id: str, player_name: str,
                                         team_id: str, team_abbr: str,
                                         season_year: int) -> dict:
-        """Aggregate all available data sources into a unified player profile dict
-        and persist it to player_profiles.  Returns the profile dict.
-
-        Data sources consulted (each recorded in 'sources'):
-          1. /athletes/{id}            → bio / headshot
-          2. /athletes/{id}/statistics → season totals/averages
-          3. /athletes/{id}/gamelog    → per-game stats from ESPN
-          4. /athletes/{id}/splits     → situational splits
-          5. player_game_stats table   → per-game stats from stored boxscores
-          6. play_by_play table        → plays mentioning the player
+        """Aggregate local DB data into a unified player profile dict and persist it.
+        Uses only data already in the local SQLite DB — no ESPN API calls.
+        Sources: roster (bio/headshot), player_game_stats (game log), play_by_play (PBP).
         """
         sport_key = f'{category}/{sport}'
         profile: dict = {
@@ -2513,52 +2506,42 @@ class ESPNWorker:
         }
         sources: list = []
 
-        # 1. Bio
-        bio_raw = self.fetch_athlete_info(category, sport, str(player_id))
-        if bio_raw:
-            ath = bio_raw.get('athlete', bio_raw)
-            pos_obj = ath.get('position') or {}
+        # 1. Bio from roster table (already populated when roster was fetched)
+        try:
+            _conn = self.db.get_connection()
+            _rrow = _conn.execute(
+                """SELECT display_name, first_name, last_name, jersey, position,
+                          position_name, display_height, display_weight, age, college,
+                          experience, headshot_url, injury_status, status_name
+                   FROM roster WHERE sport_key=? AND player_id=? LIMIT 1""",
+                (sport_key, str(player_id))
+            ).fetchone()
+            _conn.close()
+        except Exception:
+            _rrow = None
+
+        if _rrow:
+            _inj = _rrow[12] or ''
             profile['bio'] = {
-                'display_name':   ath.get('displayName', player_name),
-                'first_name':     ath.get('firstName', ''),
-                'last_name':      ath.get('lastName', ''),
-                'jersey':         ath.get('jersey', ''),
-                'position':       pos_obj.get('abbreviation', ''),
-                'position_name':  pos_obj.get('displayName', pos_obj.get('name', '')),
-                'height':         ath.get('displayHeight', ''),
-                'weight':         ath.get('displayWeight', ''),
-                'age':            ath.get('age', ''),
-                'dob':            ath.get('dateOfBirth', ''),
-                'college':        (ath.get('college') or {}).get('name', ''),
-                'experience':     (ath.get('experience') or {}).get('years', ''),
-                'headshot':       (ath.get('headshot') or {}).get('href', ''),
-                'status':         (ath.get('status') or {}).get('name', 'Active'),
-                'birth_city':     (ath.get('birthPlace') or {}).get('city', ''),
-                'birth_country':  (ath.get('birthPlace') or {}).get('country', ''),
+                'display_name':  _rrow[0] or player_name,
+                'first_name':    _rrow[1] or '',
+                'last_name':     _rrow[2] or '',
+                'jersey':        _rrow[3] or '',
+                'position':      _rrow[4] or '',
+                'position_name': _rrow[5] or '',
+                'height':        _rrow[6] or '',
+                'weight':        _rrow[7] or '',
+                'age':           _rrow[8] or '',
+                'college':       _rrow[9] or '',
+                'experience':    _rrow[10] or '',
+                'headshot':      _rrow[11] or '',
+                'status':        (f'Injured: {_inj}' if _inj else (_rrow[13] or 'Active')),
             }
-            sources.append('athlete_bio')
+            sources.append('roster')
         else:
-            profile['bio'] = {'display_name': player_name}
+            profile['bio'] = {'display_name': player_name, 'headshot': ''}
 
-        # 2. Season stats
-        stats_raw = self.fetch_athlete_season_stats(category, sport, str(player_id), season_year)
-        if stats_raw:
-            profile['season_stats'] = stats_raw
-            sources.append('athlete_statistics')
-
-        # 3. ESPN gamelog (per-game from ESPN API)
-        gl_raw = self.fetch_athlete_gamelog(category, sport, str(player_id), season_year)
-        if gl_raw:
-            profile['espn_gamelog'] = gl_raw
-            sources.append('espn_gamelog')
-
-        # 4. Splits
-        splits_raw = self.fetch_athlete_splits(category, sport, str(player_id), season_year)
-        if splits_raw:
-            profile['splits'] = splits_raw
-            sources.append('athlete_splits')
-
-        # 5. Stored boxscore game log
+        # 2. Boxscore game log from player_game_stats table
         pgs_df = self.db.get_player_game_log(sport_key, player_name)
         if not pgs_df.empty:
             import json as _j
@@ -2570,27 +2553,27 @@ class ESPNWorker:
                 except Exception:
                     labels, vals = [], []
                 rows.append({
-                    'event_id':   row['event_id'],
-                    'game_date':  str(row['game_date']),
-                    'team_abbr':  row['team_abbr'],
-                    'category':   row['category'],
-                    'home_team':  row.get('home_team', ''),
-                    'away_team':  row.get('away_team', ''),
+                    'event_id':    row['event_id'],
+                    'game_date':   str(row['game_date']),
+                    'team_abbr':   row['team_abbr'],
+                    'category':    row['category'],
+                    'home_team':   row.get('home_team', ''),
+                    'away_team':   row.get('away_team', ''),
                     'stat_labels': labels,
                     'stat_values': vals,
                 })
             profile['boxscore_gamelog'] = rows
             sources.append('player_game_stats')
 
-        # 6. PBP mentions
+        # 3. PBP mentions
         pbp_df = self.db.get_player_pbp_mentions(sport_key, player_name)
         if not pbp_df.empty:
-            profile['pbp_mentions'] = pbp_df[[
+            _pbp_cols = [c for c in [
                 'event_id', 'event_date', 'period', 'clock',
                 'play_text', 'play_type', 'scoring_play',
-                'away_score', 'home_score',
-                'home_team', 'away_team',
-            ]].to_dict('records')
+                'away_score', 'home_score', 'home_team', 'away_team',
+            ] if c in pbp_df.columns]
+            profile['pbp_mentions'] = pbp_df[_pbp_cols].to_dict('records')
             profile['pbp_mention_count'] = len(pbp_df)
             sources.append('play_by_play')
 
@@ -4049,7 +4032,7 @@ def inject_adsense() -> None:
             index_path.write_text(new_html, encoding="utf-8")
             logging.info(f"AdSense injected into index.html for {ADSENSE_CLIENT}")
         except OSError as exc:
-            logging.warning(f"AdSense index.html write failed (read-only fs?): {exc}")
+            logging.debug(f"AdSense index.html write failed (read-only fs?): {exc}")
 
 
 def main():
@@ -5095,451 +5078,305 @@ def main():
                             help="Aggregate all ESPN + boxscore + PBP data for this player"
                         )
 
-                    # ── Auto-load profile if cached ────────────────
+                    # ── Load local DB data immediately — no ESPN API needed ─
+                    _pgs_live  = db.get_player_game_log(_pt_sport_key, _pt_sel_player)
+                    _pbp_live  = db.get_player_pbp_mentions(_pt_sport_key, _pt_sel_player)
+                    _roster_bio = _pt_player_row.iloc[0].to_dict() if not _pt_player_row.empty else {}
+
+                    # Build profile (DB-only, no ESPN calls) only on explicit button click
                     _pt_profile_cached = db.get_player_profile(
                         _pt_sport_key, str(_pt_player_id), _pt_season
                     )
-
-                    if _pt_build_btn or (_pt_profile_cached is None):
-                        if _pt_sel_player:
-                            with st.spinner(
-                                f"Building profile for **{_pt_sel_player}** "
-                                f"({_pt_season_lbl} season)…"
-                            ):
-                                _pt_profile_data = worker.build_and_cache_player_profile(
-                                    _pt_cat, _pt_spt,
-                                    _pt_player_id, _pt_sel_player,
-                                    _pt_sel_team_id, _pt_team_abbr,
-                                    _pt_season
-                                )
-                            _pt_profile_cached = db.get_player_profile(
-                                _pt_sport_key, str(_pt_player_id), _pt_season
+                    if _pt_build_btn:
+                        with st.spinner(f"Caching profile for **{_pt_sel_player}**…"):
+                            worker.build_and_cache_player_profile(
+                                _pt_cat, _pt_spt,
+                                _pt_player_id, _pt_sel_player,
+                                _pt_sel_team_id, _pt_team_abbr,
+                                _pt_season
                             )
-                            st.rerun()
+                        _pt_profile_cached = db.get_player_profile(
+                            _pt_sport_key, str(_pt_player_id), _pt_season
+                        )
+                        st.rerun()
 
-                    # ── RENDER PROFILE ─────────────────────────────
-                    if _pt_profile_cached:
-                        _prf = _pt_profile_cached.get('profile', {})
-                        _bio = _prf.get('bio', {})
-                        _srcs = _pt_profile_cached.get('sources_list', [])
-                        _built_at = _pt_profile_cached.get('built_at', '')[:19]
+                    # ── Player header card — sources: roster table ──
+                    _hs_url   = _roster_bio.get('headshot_url', '')
+                    _pos_lbl  = _roster_bio.get('position', '') or _roster_bio.get('position_name', '')
+                    _inj_lbl  = _roster_bio.get('injury_status', '')
+                    _stat_lbl = _roster_bio.get('status_name', 'Active') or 'Active'
+                    _status_badge  = f'⚠ {_inj_lbl}' if _inj_lbl else _stat_lbl
+                    _status_color  = '#ef4444' if _inj_lbl else '#22c55e'
+                    _display_name  = _roster_bio.get('display_name', _pt_sel_player)
+                    _jersey_lbl    = _roster_bio.get('jersey', '')
 
-                        # ── Player header ──────────────────────────
-                        _ph1, _ph2 = st.columns([1, 5])
-                        with _ph1:
-                            _hs = _bio.get('headshot', '')
-                            if _hs:
-                                st.image(_hs, width=90)
-                        with _ph2:
-                            _pos_str = _bio.get('position', '') or _bio.get('position_name', '')
-                            _status_str = _bio.get('status', 'Active')
-                            _status_color = '#22c55e' if _status_str == 'Active' else '#ef4444'
-                            st.markdown(
-                                f"### {_bio.get('display_name', _pt_sel_player)}"
-                                f"   <span style='font-size:0.8rem;color:#888'>"
-                                f"#{_bio.get('jersey','')}  ·  {_pos_str}  ·  {_pt_team_abbr}"
-                                f"  ·  <span style='color:{_status_color}'>{_status_str}</span></span>",
-                                unsafe_allow_html=True
+                    _ph1, _ph2 = st.columns([1, 5])
+                    with _ph1:
+                        if _hs_url:
+                            st.image(_hs_url, width=90)
+                    with _ph2:
+                        st.markdown(
+                            f"### {_display_name}"
+                            f"   <span style='font-size:0.8rem;color:#888'>"
+                            + (f'#{_jersey_lbl}  ·  ' if _jersey_lbl else '')
+                            + f"{_pos_lbl}  ·  {_pt_team_abbr}"
+                            f"  ·  <span style='color:{_status_color}'>{_status_badge}</span></span>",
+                            unsafe_allow_html=True
+                        )
+                        _bio_parts2 = []
+                        if _roster_bio.get('display_height'): _bio_parts2.append(_roster_bio['display_height'])
+                        if _roster_bio.get('display_weight'): _bio_parts2.append(_roster_bio['display_weight'])
+                        if _roster_bio.get('age'):            _bio_parts2.append(f"Age {_roster_bio['age']}")
+                        if _roster_bio.get('college'):        _bio_parts2.append(_roster_bio['college'])
+                        if _roster_bio.get('experience'):     _bio_parts2.append(f"Yr {_roster_bio['experience']}")
+                        if _bio_parts2:
+                            st.caption('  ·  '.join(str(x) for x in _bio_parts2 if x))
+                        _data_hint = (
+                            f"📦 {len(_pgs_live)} boxscore rows"
+                            + (f"  ·  🎯 {len(_pbp_live)} PBP plays" if not _pbp_live.empty else '')
+                            + (f"  ·  Profile cached {_pt_profile_cached.get('built_at','')[:10]}"
+                               if _pt_profile_cached else "  ·  *Click ⚙ Build Profile to cache*")
+                        )
+                        st.caption(_data_hint)
+
+                    st.divider()
+
+                    # ── Sub-tabs — all data sourced from local DB ──
+                    _ptsub1, _ptsub2, _ptsub3, _ptsub4 = st.tabs([
+                        "📊 Stats",
+                        "📅 Game Log",
+                        "📈 Charts",
+                        "🎯 PBP",
+                    ])
+
+                    # ══ SUB-TAB 1: STATS ═══════════════════════════
+                    with _ptsub1:
+                        import json as _jpt_s
+                        if _pgs_live.empty:
+                            st.info(
+                                "No boxscore data for this player yet. "
+                                "Fetch game **Summaries** from the Scoreboard tab first, "
+                                "then come back here."
                             )
-                            _bio_parts = []
-                            if _bio.get('height'):   _bio_parts.append(_bio['height'])
-                            if _bio.get('weight'):   _bio_parts.append(_bio['weight'])
-                            if _bio.get('age'):      _bio_parts.append(f"Age {_bio['age']}")
-                            if _bio.get('college'):  _bio_parts.append(_bio['college'])
-                            if _bio.get('experience') != '':
-                                _bio_parts.append(f"Yr {_bio.get('experience')}")
-                            if _bio_parts:
-                                st.caption("  ·  ".join(str(x) for x in _bio_parts))
-                            st.caption(
-                                f"Sources: {', '.join(_srcs) or 'none'}  ·  "
-                                f"Built {_built_at}"
+                        else:
+                            _cats_avail = sorted(_pgs_live['category'].unique())
+                            _cat_tabs_s = (
+                                st.tabs([f'**{c}**' for c in _cats_avail])
+                                if len(_cats_avail) > 1 else [st.container()]
                             )
-
-                        st.divider()
-
-                        # ── Sub-tabs ───────────────────────────────
-                        _ptsub1, _ptsub2, _ptsub3, _ptsub4, _ptsub5 = st.tabs([
-                            "📊 Season Stats",
-                            "📅 Game Log",
-                            "📈 Charts",
-                            "🎯 PBP Highlights",
-                            "📡 Raw ESPN Feed",
-                        ])
-
-                        # ══ SUB-TAB 1: SEASON STATS ════════════════
-                        with _ptsub1:
-                            _ss_raw = _prf.get('season_stats', {})
-                            _ss_cats = (_ss_raw.get('categories', [])
-                                        or _ss_raw.get('splits', {}).get('categories', []))
-                            if _ss_cats:
-                                for _sc in _ss_cats:
-                                    _sc_name   = _sc.get('displayName', _sc.get('name', 'Stats'))
-                                    _sc_labels = _sc.get('labels', _sc.get('columns', []))
-                                    _sc_stats  = _sc.get('stats', [])
-                                    if not _sc_stats:
-                                        continue
-                                    st.markdown(f"**{_sc_name}**")
-                                    if isinstance(_sc_stats[0], (str, int, float)):
-                                        # flat list of values
-                                        _sc_row = {
-                                            l: v for l, v in zip(_sc_labels, _sc_stats)
-                                        }
+                            for _ci, _cn in enumerate(_cats_avail):
+                                with _cat_tabs_s[_ci]:
+                                    _cf = _pgs_live[_pgs_live['category'] == _cn].copy()
+                                    try:
+                                        _lbl0 = _jpt_s.loads(_cf.iloc[0]['stat_labels'])
+                                    except Exception:
+                                        _lbl0 = []
+                                    if _lbl0:
+                                        _cf['_vals'] = _cf['stat_values'].apply(
+                                            lambda x: _jpt_s.loads(x) if x else [])
+                                        for _si, _sl in enumerate(_lbl0):
+                                            _cf[_sl] = _cf['_vals'].apply(
+                                                lambda v, i=_si: v[i] if i < len(v) else '')
+                                        _show_cols = (
+                                            ['game_date', 'team_abbr'] + _lbl0[:12]
+                                        )
+                                        _show_cols = [c for c in _show_cols if c in _cf.columns]
+                                        _cf_disp = (
+                                            _cf[_show_cols]
+                                            .rename(columns={'game_date': 'Date', 'team_abbr': 'Team'})
+                                            .sort_values('Date', ascending=False)
+                                        )
+                                        st.dataframe(_cf_disp, use_container_width=True, hide_index=True)
+                                        # Season averages row
+                                        _num_lbls = [
+                                            l for l in _lbl0
+                                            if _cf[l].apply(
+                                                lambda v: str(v).replace('.', '').lstrip('-').isdigit()
+                                            ).any()
+                                        ]
+                                        if _num_lbls:
+                                            _avgs = {}
+                                            for _nl in _num_lbls[:12]:
+                                                try:
+                                                    _avgs[_nl] = round(
+                                                        _cf[_nl].apply(
+                                                            lambda v: float(str(v).replace(',', ''))
+                                                            if str(v).replace('.', '').lstrip('-').isdigit()
+                                                            else None
+                                                        ).dropna().mean(), 2
+                                                    )
+                                                except Exception:
+                                                    pass
+                                            if _avgs:
+                                                st.caption(f"Season averages over {len(_cf)} games:")
+                                                st.dataframe([_avgs], use_container_width=True,
+                                                             hide_index=True)
+                                    else:
                                         st.dataframe(
-                                            [_sc_row], use_container_width=True,
-                                            hide_index=True
+                                            _cf[['game_date', 'team_abbr',
+                                                   'stat_labels', 'stat_values']],
+                                            use_container_width=True, hide_index=True
                                         )
-                                    else:
-                                        # list of dicts / athlete rows
-                                        _sc_rows = []
-                                        for _sr in _sc_stats:
-                                            if isinstance(_sr, dict):
-                                                _sc_rows.append(_sr)
-                                        if _sc_rows:
-                                            import pandas as _pdss
-                                            st.dataframe(
-                                                _pdss.DataFrame(_sc_rows),
-                                                use_container_width=True, hide_index=True
-                                            )
-                            else:
-                                # Fall back to ESPN leaders totals for this player
-                                _bs_log = _prf.get('boxscore_gamelog', [])
-                                if _bs_log:
-                                    # Aggregate numeric stats across all boxscore rows
-                                    import pandas as _pdss2
-                                    _agg_rows = []
-                                    for _br in _bs_log:
-                                        labels = _br.get('stat_labels', [])
-                                        vals   = _br.get('stat_values', [])
-                                        cat    = _br.get('category', '')
-                                        row_d  = {'Category': cat}
-                                        for _l, _v in zip(labels, vals):
-                                            row_d[_l] = _v
-                                        _agg_rows.append(row_d)
-                                    if _agg_rows:
-                                        _agg_df = _pdss2.DataFrame(_agg_rows)
-                                        st.caption(
-                                            "Season stats unavailable from ESPN — "
-                                            "showing per-game boxscore entries."
+
+                    # ══ SUB-TAB 2: GAME LOG ════════════════════════
+                    with _ptsub2:
+                        import json as _jpt_g
+                        if _pgs_live.empty:
+                            st.info("No game log data. Fetch Summaries from the Scoreboard tab.")
+                        else:
+                            try:
+                                _glbl0 = _jpt_g.loads(_pgs_live.iloc[0]['stat_labels'])
+                            except Exception:
+                                _glbl0 = []
+                            _glog_df = _pgs_live.copy()
+                            if _glbl0:
+                                _glog_df['_vals'] = _glog_df['stat_values'].apply(
+                                    lambda x: _jpt_g.loads(x) if x else [])
+                                for _li, _ll in enumerate(_glbl0[:10]):
+                                    _glog_df[_ll] = _glog_df['_vals'].apply(
+                                        lambda v, i=_li: v[i] if i < len(v) else '')
+                            _gcols = (
+                                ['game_date', 'category', 'team_abbr',
+                                 'home_team', 'away_team'] + (_glbl0[:10] if _glbl0 else [])
+                            )
+                            _gcols = [c for c in _gcols if c in _glog_df.columns]
+                            _glog_disp = (
+                                _glog_df[_gcols]
+                                .rename(columns={
+                                    'game_date': 'Date', 'category': 'Cat',
+                                    'team_abbr': 'Team', 'home_team': 'Home', 'away_team': 'Away'
+                                })
+                                .sort_values('Date', ascending=False)
+                            )
+                            st.dataframe(_glog_disp, use_container_width=True, hide_index=True)
+                            st.caption(f"{len(_glog_disp)} game entries")
+
+                    # ══ SUB-TAB 3: CHARTS ══════════════════════════
+                    with _ptsub3:
+                        import plotly.graph_objects as _go_pt
+                        import json as _jpt_c
+                        if _pgs_live.empty:
+                            st.info("No data to chart. Fetch Summaries from the Scoreboard tab.")
+                        else:
+                            _ch_cats = sorted(_pgs_live['category'].unique())
+                            _ch_cat_sel = st.selectbox("Category", _ch_cats, key="pt_chart_cat")
+                            _chf = _pgs_live[_pgs_live['category'] == _ch_cat_sel].copy()
+                            try:
+                                _ch_lbls = _jpt_c.loads(_chf.iloc[0]['stat_labels'])
+                            except Exception:
+                                _ch_lbls = []
+                            if _ch_lbls:
+                                _chf['_vals'] = _chf['stat_values'].apply(
+                                    lambda x: _jpt_c.loads(x) if x else [])
+                                for _li2, _ll2 in enumerate(_ch_lbls):
+                                    _chf[_ll2] = _chf['_vals'].apply(
+                                        lambda v, i=_li2: (
+                                            float(str(v[i]).replace(',', ''))
+                                            if i < len(v)
+                                            and str(v[i]).replace('.', '').lstrip('-').isdigit()
+                                            else None
                                         )
-                                        st.dataframe(_agg_df.head(30),
-                                                     use_container_width=True,
-                                                     hide_index=True)
-                                    else:
-                                        st.info("No season stats available for this player/season.")
-                                else:
-                                    st.info(
-                                        "Click **⚙ Build Profile** to pull season stats "
-                                        "from ESPN for this player."
                                     )
-
-                        # ══ SUB-TAB 2: GAME LOG ════════════════════
-                        with _ptsub2:
-                            import pandas as _pdgl
-                            _gl_data = []
-
-                            # Prefer ESPN native gamelog
-                            _esp_gl = _prf.get('espn_gamelog', {})
-                            _esp_events = _esp_gl.get('events', {})
-                            if isinstance(_esp_events, dict):
-                                _esp_event_list = list(_esp_events.values())
-                            elif isinstance(_esp_events, list):
-                                _esp_event_list = _esp_events
-                            else:
-                                _esp_event_list = []
-
-                            if _esp_event_list:
-                                for _ge in _esp_event_list:
-                                    _ge_stats = _ge.get('stats', [])
-                                    _ge_labels = _esp_gl.get('labels', [])
-                                    _ge_date   = _ge.get('gameDate', _ge.get('date', ''))[:10]
-                                    _ge_opp    = (_ge.get('opponent') or {}).get('abbreviation', '')
-                                    _ge_ha     = 'H' if _ge.get('homeAway') == 'home' else 'A'
-                                    _ge_result = _ge.get('result', '')
-                                    _row_d = {
-                                        'Date':   _ge_date,
-                                        'Opp':    _ge_opp,
-                                        'H/A':    _ge_ha,
-                                        'Result': _ge_result,
-                                    }
-                                    for _l, _v in zip(_ge_labels, _ge_stats):
-                                        _row_d[_l] = _v
-                                    _gl_data.append(_row_d)
-
-                            # Also show boxscore gamelog
-                            _bs_log2 = _prf.get('boxscore_gamelog', [])
-                            if not _gl_data and _bs_log2:
-                                # Pivot boxscore rows into one row per game
-                                _game_map: dict = {}
-                                for _br in _bs_log2:
-                                    _eid  = _br['event_id']
-                                    _gdate = _br['game_date']
-                                    _cat   = _br['category']
-                                    _labels = _br.get('stat_labels', [])
-                                    _vals   = _br.get('stat_values', [])
-                                    if _eid not in _game_map:
-                                        _game_map[_eid] = {
-                                            'Date': str(_gdate)[:10],
-                                            'Home': _br.get('home_team', ''),
-                                            'Away': _br.get('away_team', ''),
-                                        }
-                                    for _l, _v in zip(_labels, _vals):
-                                        _game_map[_eid][f"{_cat}·{_l}"] = _v
-                                _gl_data = list(_game_map.values())
-
-                            if _gl_data:
-                                _gl_df = _pdgl.DataFrame(_gl_data)
-                                # Sort by date descending
-                                if 'Date' in _gl_df.columns:
-                                    _gl_df = _gl_df.sort_values('Date', ascending=False)
-                                st.dataframe(_gl_df, use_container_width=True, hide_index=True)
-                                st.caption(f"{len(_gl_df)} game entries")
-                            else:
-                                st.info(
-                                    "No game log data available. "
-                                    "Click **⚙ Build Profile** to pull from ESPN gamelog "
-                                    "and stored boxscores."
-                                )
-
-                        # ══ SUB-TAB 3: CHARTS ═════════════════════
-                        with _ptsub3:
-                            import plotly.graph_objects as _go_pt
-                            import pandas as _pdch
-
-                            _ch_data = []
-                            _esp_gl2 = _prf.get('espn_gamelog', {})
-                            _esp_events2 = _esp_gl2.get('events', {})
-                            if isinstance(_esp_events2, dict):
-                                _esp_ev2_list = list(_esp_events2.values())
-                            elif isinstance(_esp_events2, list):
-                                _esp_ev2_list = _esp_events2
-                            else:
-                                _esp_ev2_list = []
-
-                            if _esp_ev2_list:
-                                _ch_labels = _esp_gl2.get('labels', [])
-                                for _ge2 in _esp_ev2_list:
-                                    _ge2_stats = _ge2.get('stats', [])
-                                    _ge2_date  = _ge2.get('gameDate', _ge2.get('date', ''))[:10]
-                                    _row2 = {'Date': _ge2_date}
-                                    for _l2, _v2 in zip(_ch_labels, _ge2_stats):
-                                        try:
-                                            _row2[_l2] = float(str(_v2).replace(',', ''))
-                                        except (ValueError, TypeError):
-                                            _row2[_l2] = None
-                                    _ch_data.append(_row2)
-
-                            if not _ch_data:
-                                _bs_log3 = _prf.get('boxscore_gamelog', [])
-                                if _bs_log3:
-                                    _game_map3: dict = {}
-                                    for _br3 in _bs_log3:
-                                        _eid3  = _br3['event_id']
-                                        _gdate3 = str(_br3['game_date'])[:10]
-                                        _labels3 = _br3.get('stat_labels', [])
-                                        _vals3   = _br3.get('stat_values', [])
-                                        if _eid3 not in _game_map3:
-                                            _game_map3[_eid3] = {'Date': _gdate3}
-                                        for _l3, _v3 in zip(_labels3, _vals3):
-                                            try:
-                                                _game_map3[_eid3][_l3] = float(
-                                                    str(_v3).replace(',', ''))
-                                            except (ValueError, TypeError):
-                                                _game_map3[_eid3][_l3] = None
-                                    _ch_data = list(_game_map3.values())
-
-                            if _ch_data:
-                                _ch_df = _pdch.DataFrame(_ch_data)
-                                if 'Date' in _ch_df.columns:
-                                    _ch_df = _ch_df.sort_values('Date').reset_index(drop=True)
-                                # Pick numeric columns only
-                                _num_cols = [
-                                    c for c in _ch_df.columns
-                                    if c != 'Date'
-                                    and _ch_df[c].dtype in ('float64', 'int64')
-                                    and _ch_df[c].notna().any()
-                                ]
-                                if _num_cols:
-                                    _ch_stat_pick = st.selectbox(
-                                        "Stat to chart", _num_cols, key="pt_chart_stat"
-                                    )
-                                    _ch_plot = _ch_df.dropna(subset=[_ch_stat_pick])
-                                    _ch_mean = float(_ch_plot[_ch_stat_pick].mean())
-                                    _fig_pt = _go_pt.Figure()
-                                    _fig_pt.add_trace(_go_pt.Bar(
-                                        x=_ch_plot['Date'],
-                                        y=_ch_plot[_ch_stat_pick],
-                                        name=_ch_stat_pick,
-                                        marker_color='#3b82f6',
-                                        opacity=0.8,
+                                _num_cols2 = [l for l in _ch_lbls if _chf[l].notna().any()]
+                                if _num_cols2:
+                                    _ch_stat2 = st.selectbox("Stat", _num_cols2, key="pt_chart_stat")
+                                    _chf2 = _chf.dropna(subset=[_ch_stat2]).sort_values('game_date')
+                                    _ch_mean2 = float(_chf2[_ch_stat2].mean())
+                                    _fig2 = _go_pt.Figure()
+                                    _fig2.add_trace(_go_pt.Bar(
+                                        x=_chf2['game_date'].astype(str),
+                                        y=_chf2[_ch_stat2],
+                                        name=_ch_stat2,
+                                        marker_color='#3b82f6', opacity=0.8,
                                     ))
-                                    if len(_ch_plot) >= 3:
-                                        _roll5 = _ch_plot[_ch_stat_pick].rolling(
-                                            5, min_periods=1).mean()
-                                        _fig_pt.add_trace(_go_pt.Scatter(
-                                            x=_ch_plot['Date'],
-                                            y=_roll5,
-                                            mode='lines',
-                                            name='5-game avg',
+                                    if len(_chf2) >= 3:
+                                        _fig2.add_trace(_go_pt.Scatter(
+                                            x=_chf2['game_date'].astype(str),
+                                            y=_chf2[_ch_stat2].rolling(5, min_periods=1).mean(),
+                                            mode='lines', name='5-game avg',
                                             line=dict(color='#f59e0b', width=2, dash='dot'),
                                         ))
-                                    _fig_pt.add_hline(
-                                        y=_ch_mean,
-                                        line_dash='dash', line_color='rgba(100,100,100,0.4)',
-                                        annotation_text=f'Season avg {_ch_mean:.1f}',
-                                        annotation_font_size=11,
+                                    _fig2.add_hline(
+                                        y=_ch_mean2, line_dash='dash',
+                                        line_color='rgba(100,100,100,0.4)',
+                                        annotation_text=f'Avg {_ch_mean2:.1f}',
                                     )
-                                    _fig_pt.update_layout(
-                                        title=f"{_bio.get('display_name', _pt_sel_player)}"
-                                              f" — {_ch_stat_pick} per game",
-                                        height=380,
-                                        plot_bgcolor='#f9f9f9',
+                                    _fig2.update_layout(
+                                        title=f"{_display_name} — {_ch_stat2} per game",
+                                        height=380, plot_bgcolor='#f9f9f9',
                                         margin=dict(t=50, b=40, l=40, r=10),
                                         legend=dict(orientation='h', y=-0.25),
                                         xaxis=dict(tickangle=-45),
                                     )
-                                    st.plotly_chart(_fig_pt, use_container_width=True)
-
-                                    # Season distribution histogram
-                                    _fig_hist = _go_pt.Figure(_go_pt.Histogram(
-                                        x=_ch_plot[_ch_stat_pick],
-                                        nbinsx=20,
-                                        marker_color='#6366f1',
-                                        opacity=0.8,
+                                    st.plotly_chart(_fig2, use_container_width=True)
+                                    _fig_h2 = _go_pt.Figure(_go_pt.Histogram(
+                                        x=_chf2[_ch_stat2], nbinsx=20,
+                                        marker_color='#6366f1', opacity=0.8,
                                     ))
-                                    _fig_hist.add_vline(
-                                        x=_ch_mean, line_dash='dash', line_color='#f59e0b',
-                                        annotation_text=f'Mean {_ch_mean:.1f}',
+                                    _fig_h2.add_vline(
+                                        x=_ch_mean2, line_dash='dash', line_color='#f59e0b',
+                                        annotation_text=f'Mean {_ch_mean2:.1f}',
                                     )
-                                    _fig_hist.update_layout(
-                                        title=f"{_ch_stat_pick} distribution",
-                                        height=260,
-                                        plot_bgcolor='#f9f9f9',
+                                    _fig_h2.update_layout(
+                                        title=f"{_ch_stat2} distribution",
+                                        height=240, plot_bgcolor='#f9f9f9',
                                         margin=dict(t=40, b=30, l=40, r=10),
                                     )
-                                    st.plotly_chart(_fig_hist, use_container_width=True)
+                                    st.plotly_chart(_fig_h2, use_container_width=True)
                                 else:
-                                    st.info("No numeric stats available for charting.")
+                                    st.info("No numeric stat columns found for this category.")
                             else:
-                                st.info(
-                                    "No game-level data to chart. "
-                                    "Click **⚙ Build Profile** first."
-                                )
+                                st.info("Could not parse stat labels.")
 
-                        # ══ SUB-TAB 4: PBP HIGHLIGHTS ══════════════
-                        with _ptsub4:
-                            _pbp_list = _prf.get('pbp_mentions', [])
-                            if _pbp_list:
-                                import pandas as _pdpbp
-                                _pbp_df = _pdpbp.DataFrame(_pbp_list)
-                                st.caption(
-                                    f"**{len(_pbp_list)} plays** mentioning "
-                                    f"*{_bio.get('display_name', _pt_sel_player)}* "
-                                    f"found in stored play-by-play data."
-                                )
-
-                                # Filter: scoring plays only toggle
-                                _pbp_scoring_only = st.checkbox(
-                                    "Scoring plays only", key="pbp_scoring_only"
-                                )
-                                if _pbp_scoring_only:
-                                    _pbp_df2 = _pbp_df[_pbp_df['scoring_play'].astype(bool)]
-                                else:
-                                    _pbp_df2 = _pbp_df
-
-                                # Group by game
-                                _pbp_games = (
-                                    _pbp_df2[['event_id', 'event_date',
-                                               'home_team', 'away_team']]
-                                    .drop_duplicates('event_id')
-                                    .sort_values('event_date', ascending=False)
-                                )
-                                for _, _pgrow in _pbp_games.iterrows():
-                                    _pg_label = (
-                                        f"{str(_pgrow['event_date'])[:10]}  "
-                                        f"{_pgrow['away_team']} @ {_pgrow['home_team']}"
-                                    )
-                                    _pg_plays = _pbp_df2[
-                                        _pbp_df2['event_id'] == _pgrow['event_id']
-                                    ].sort_values(
-                                        'period' if 'period' in _pbp_df2.columns else 'event_id'
-                                    )
-                                    with st.expander(f"🏟 {_pg_label} — {len(_pg_plays)} plays"):
-                                        for _, _play in _pg_plays.iterrows():
-                                            _scr_icon = "🏆 " if _play.get('scoring_play') else ""
-                                            _qtr = f"Q{_play.get('period','?')} {_play.get('clock','')}"
-                                            _score_txt = (
-                                                f"{_play.get('away_score',0)}–"
-                                                f"{_play.get('home_score',0)}"
-                                            )
-                                            st.markdown(
-                                                f"{_scr_icon}**{_qtr}** ({_score_txt})  "
-                                                f"{_play.get('play_text','')}"
-                                            )
-                            else:
-                                st.info(
-                                    "No play-by-play data found mentioning this player. "
-                                    "PBP is populated when game **Summaries** are fetched "
-                                    "from the Scoreboard tab."
-                                )
-
-                        # ══ SUB-TAB 5: RAW ESPN FEED ═══════════════
-                        with _ptsub5:
+                    # ══ SUB-TAB 4: PBP ═════════════════════════════
+                    with _ptsub4:
+                        if _pbp_live.empty:
+                            st.info(
+                                "No play-by-play data mentioning this player. "
+                                "PBP is populated when game **Summaries** are fetched "
+                                "from the Scoreboard tab."
+                            )
+                        else:
                             st.caption(
-                                "Raw ESPN API responses used to build this profile. "
-                                "Useful for debugging or discovering available fields."
+                                f"**{len(_pbp_live)} plays** mentioning *{_display_name}*"
                             )
-                            _raw_opts = {
-                                'Bio (athlete info)':   'bio',
-                                'Season stats':         'season_stats',
-                                'ESPN gamelog':         'espn_gamelog',
-                                'Situational splits':   'splits',
-                            }
-                            _raw_pick = st.selectbox(
-                                "View raw data", list(_raw_opts.keys()),
-                                key="pt_raw_pick"
+                            _pbp_sc_only = st.checkbox("Scoring plays only", key="pbp_sc_only")
+                            _pbp_show = (
+                                _pbp_live[_pbp_live['scoring_play'].astype(bool)]
+                                if _pbp_sc_only else _pbp_live
                             )
-                            _raw_section = _prf.get(_raw_opts[_raw_pick])
-                            if _raw_section:
-                                st.json(_raw_section, expanded=False)
-                            else:
-                                st.info(f"No data for **{_raw_pick}** in this profile.")
-
-                            # Also let user fetch fresh gamelog
-                            st.divider()
-                            _pt3_ssn_key = f'pt3_season_{_pt_cat}'
-                            if _pt3_ssn_key not in st.session_state:
-                                st.session_state[_pt3_ssn_key] = ESPNWorker._espn_season_year(_pt_cat)
-                            _pt3_base_yr = max(_pt_cur_yr, ESPNWorker._espn_season_year(_pt_cat))
-                            _pt3_season = st.selectbox(
-                                "Fetch season", list(range(_pt3_base_yr, _pt3_base_yr - 5, -1)),
-                                key=_pt3_ssn_key,
-                                format_func=lambda y, _c=_pt_cat: ESPNWorker._season_label(_c, y)
+                            _pbp_id_cols = [c for c in
+                                            ['event_id', 'event_date', 'home_team', 'away_team']
+                                            if c in _pbp_show.columns]
+                            _pbp_game_ids = (
+                                _pbp_show[_pbp_id_cols]
+                                .drop_duplicates('event_id')
+                                .sort_values('event_date', ascending=False)
+                                if 'event_date' in _pbp_id_cols
+                                else _pbp_show[['event_id']].drop_duplicates()
                             )
-                            _pt3_lbl = ESPNWorker._season_label(_pt_cat, _pt3_season)
-                            if st.button("📡 Re-fetch ESPN gamelog", key="pt3_refetch_gl"):
-                                with st.spinner(
-                                    f"Fetching {_pt_ep} gamelog for "
-                                    f"{_bio.get('display_name', _pt_sel_player)} "
-                                    f"({_pt3_lbl})…"
-                                ):
-                                    _gl_fresh = worker.fetch_athlete_gamelog(
-                                        _pt_cat, _pt_spt, str(_pt_player_id), _pt3_season
-                                    )
-                                if _gl_fresh:
-                                    st.success("Fetched! Re-build profile to apply changes.")
-                                    st.json(_gl_fresh, expanded=False)
-                                else:
-                                    st.warning(f"No data. Error: {worker.last_error}")
-
-                    else:
-                        # No profile yet
-                        st.info(
-                            f"Select a player above and click **⚙ Build Profile** to "
-                            f"aggregate all available stats, game log, and PBP data "
-                            f"for the **{_pt_season_lbl}** season. "
-                            f"The profile is saved to the database so it only needs to "
-                            f"be built once."
-                        )
+                            for _, _pgr in _pbp_game_ids.iterrows():
+                                _pg_lbl = (
+                                    f"{str(_pgr.get('event_date', ''))[:10]}  "
+                                    f"{_pgr.get('away_team', '')} @ {_pgr.get('home_team', '')}"
+                                )
+                                _pg_pl = _pbp_show[
+                                    _pbp_show['event_id'] == _pgr['event_id']
+                                ]
+                                if 'period' in _pg_pl.columns:
+                                    _pg_pl = _pg_pl.sort_values('period')
+                                with st.expander(f"🏟 {_pg_lbl} — {len(_pg_pl)} plays"):
+                                    for _, _ply in _pg_pl.iterrows():
+                                        _si2 = '🏆 ' if _ply.get('scoring_play') else ''
+                                        _qtr2 = f"Q{_ply.get('period', '?')} {_ply.get('clock', '')}"
+                                        _sc2 = (
+                                            f"{_ply.get('away_score', 0)}–"
+                                            f"{_ply.get('home_score', 0)}"
+                                        )
+                                        st.markdown(
+                                            f"{_si2}**{_qtr2}** ({_sc2})  "
+                                            f"{_ply.get('play_text', '')}"
+                                        )
             else:
                 # No teams loaded at all
                 st.info(
