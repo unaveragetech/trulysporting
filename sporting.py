@@ -3905,18 +3905,26 @@ def main():
 """)
 
     # ── INITIALISE ────────────────────────────────────────────
-    if 'db' not in st.session_state:
+    # Use a schema/API version stamp so stale cached objects are always replaced
+    # on deploy. Bump _APP_VER whenever new methods are added to SportsDB or ESPNWorker.
+    _APP_VER = 6  # bump each time new DB/worker methods are added
+
+    def _fresh_init():
         st.session_state.db = SportsDB()
         st.session_state.worker = ESPNWorker(st.session_state.db)
         st.session_state.worker.start()
-    elif not hasattr(st.session_state.get('worker'), 'fetch_league_leaders'):
-        # Worker was cached before fetch_league_leaders was added — recreate it
+        st.session_state._app_ver = _APP_VER
+
+    if ('db' not in st.session_state
+            or st.session_state.get('_app_ver', 0) < _APP_VER
+            or not hasattr(st.session_state.get('db'), 'get_season_games_df')
+            or not hasattr(st.session_state.get('worker'), 'fetch_league_leaders')):
         try:
-            st.session_state.worker.running = False
+            if hasattr(st.session_state.get('worker'), 'running'):
+                st.session_state.worker.running = False
         except Exception:
             pass
-        st.session_state.worker = ESPNWorker(st.session_state.db)
-        st.session_state.worker.start()
+        _fresh_init()
 
     db: SportsDB = st.session_state.db
     worker: ESPNWorker = st.session_state.worker
