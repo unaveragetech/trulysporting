@@ -2012,8 +2012,14 @@ class ESPNWorker:
         import datetime as _dt
         now = _dt.datetime.now()
         yr  = now.year
-        if category.lower() in ('football', 'basketball', 'hockey'):
+        if category.lower() == 'football':
+            # Football year = season-start year (NFL 2025 ran Aug 2025 – Feb 2026)
             return yr - 1 if now.month < 8 else yr
+        elif category.lower() in ('basketball', 'hockey'):
+            # End-year convention: "season 2026" = Oct 2025 – Jun 2026
+            # Jan-Sep → season ending this year is active → return yr
+            # Oct-Dec → new season just started, ends next year → return yr + 1
+            return yr if now.month <= 9 else yr + 1
         return yr
 
     def fetch_and_process(self, category: str, sport: str, endpoint_type: str,
@@ -4084,13 +4090,26 @@ def main():
             cat, sport = sel_ep.split('/')
 
             with _sb_c2:
-                _sb_yr_list = list(range(_dt1.datetime.now().year,
-                                         _dt1.datetime.now().year - 8, -1))
                 _sb_def_yr  = ESPNWorker._espn_season_year(cat)
+                # Always ensure the default year is reachable in the list
+                _sb_base_yr = max(_dt1.datetime.now().year, _sb_def_yr)
+                _sb_yr_list = list(range(_sb_base_yr, _sb_base_yr - 9, -1))
                 _sb_ssn_key = f'sb_season_{cat}'
                 if _sb_ssn_key not in st.session_state:
                     st.session_state[_sb_ssn_key] = _sb_def_yr
-                sb_season = st.selectbox("Season", _sb_yr_list, key=_sb_ssn_key)
+
+                def _sb_fmt(yr_val, _cat=cat):
+                    """Human-readable season range label for the year integer."""
+                    if _cat == 'football':
+                        return f"{yr_val}\u2013{yr_val + 1}"  # 2025 → 2025–2026
+                    elif _cat == 'baseball':
+                        return str(yr_val)                     # 2026 → 2026
+                    else:
+                        return f"{yr_val - 1}\u2013{yr_val}"  # 2026 → 2025–2026
+
+                sb_season = st.selectbox("Season", _sb_yr_list, key=_sb_ssn_key,
+                                         format_func=_sb_fmt)
+                _sb_season_lbl = _sb_fmt(sb_season)
 
             with _sb_c3:
                 _sb_status_filter = st.radio(
@@ -4114,12 +4133,12 @@ def main():
                 _lfs_c1, _lfs_c2 = st.columns([2, 1])
                 with _lfs_c1:
                     st.caption(
-                        f"Fetches every week / month of the **{sb_season}** {sel_ep} season "
+                        f"Fetches every week / month of the **{_sb_season_lbl}** {sel_ep} season "
                         f"from ESPN in one pass. This may take 20–60 seconds depending on "
                         f"sport. Run once — results are cached."
                     )
                 with _lfs_c2:
-                    _sb_full_btn = st.button(f"📥 Load Full {sb_season} Season",
+                    _sb_full_btn = st.button(f"📥 Load Full {_sb_season_lbl} Season",
                                              key="sb_full_season", type="primary")
 
                 _sb_date_c1, _sb_date_c2 = st.columns([2, 1])
@@ -4153,9 +4172,9 @@ def main():
 
             if df_games.empty:
                 st.info(
-                    f"No games stored for **{sel_ep}** — **{sb_season} season** yet. "
+                    f"No games stored for **{sel_ep}** — **{_sb_season_lbl} season** yet. "
                     f"Expand **📅 Load / Refresh Season Data** above and click "
-                    f"**📥 Load Full {sb_season} Season** to pull all games from ESPN."
+                    f"**📥 Load Full {_sb_season_lbl} Season** to pull all games from ESPN."
                 )
             else:
                 # ── Apply status filter ────────────────────────
