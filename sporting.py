@@ -4862,6 +4862,15 @@ def main():
             df_teams   = db.get_teams_df(sel_ep3)
             df_detail3 = db.get_team_detail_df(sel_ep3)
 
+            # ── Auto-load team list on first visit ─────────────
+            _teams_auto_key = f'teams_auto_{sel_ep3}'
+            if df_teams.empty and not st.session_state.get(_teams_auto_key):
+                st.session_state[_teams_auto_key] = True
+                with st.spinner(f"Loading {sel_ep3} teams…"):
+                    worker.fetch_and_process(cat3, spt3, 'teams', force_refresh=True)
+                df_teams   = db.get_teams_df(sel_ep3)
+                df_detail3 = db.get_team_detail_df(sel_ep3)
+
             if df_teams.empty:
                 st.info("No teams loaded yet — click **🔄 Load Teams** above.")
             else:
@@ -4948,20 +4957,50 @@ def main():
                             team_name3  = sel_row3['team_name']
                             team_color3 = '#' + str(sel_row3.get('color', '') or '1a1a1a')
 
+                            # ── Auto-fetch detail + roster on first selection ──
+                            _det_auto_key = f'det_auto_{sel_tid3}'
+                            _ros_auto_key = f'ros_auto_{sel_tid3}'
+                            _needs_detail = sel_tid3 not in detail_map3
+                            _needs_roster = db.get_roster_df(sel_ep3, sel_tid3).empty
+
+                            if _needs_detail and not st.session_state.get(_det_auto_key):
+                                st.session_state[_det_auto_key] = True
+                                with st.spinner(f"Loading {team_abbr3} details…"):
+                                    worker.fetch_team_detail(cat3, spt3,
+                                                             sel_tid3, team_slug3)
+                                df_detail3 = db.get_team_detail_df(sel_ep3)
+                                # Rebuild detail_map3 with the freshly fetched data
+                                detail_map3 = {}
+                                if not df_detail3.empty:
+                                    for _, dr in df_detail3.iterrows():
+                                        matches = df_teams[
+                                            df_teams['team_slug'] == dr['team_slug']]
+                                        if not matches.empty:
+                                            detail_map3[
+                                                str(matches.iloc[0]['team_id'])] = dr
+
+                            if _needs_roster and not st.session_state.get(_ros_auto_key):
+                                st.session_state[_ros_auto_key] = True
+                                with st.spinner(f"Loading {team_abbr3} roster…"):
+                                    worker.fetch_team_roster(cat3, spt3,
+                                                             sel_tid3, team_abbr3)
+
                             # ── Action buttons row ─────────────────
                             ra1, ra2, ra3 = st.columns([1, 1, 3])
                             with ra1:
-                                if st.button("📥 Load Detail", key="t3_load_det"):
+                                if st.button("🔄 Refresh Detail", key="t3_load_det"):
                                     with st.spinner(f"Fetching {team_abbr3} detail…"):
                                         worker.fetch_team_detail(cat3, spt3,
                                                                   sel_tid3, team_slug3)
                                     df_detail3 = db.get_team_detail_df(sel_ep3)
+                                    st.session_state[_det_auto_key] = True
                                     st.rerun()
                             with ra2:
-                                if st.button("📋 Load Roster", key="t3_load_ros"):
+                                if st.button("🔄 Refresh Roster", key="t3_load_ros"):
                                     with st.spinner(f"Fetching {team_abbr3} roster…"):
                                         worker.fetch_team_roster(cat3, spt3,
                                                                   sel_tid3, team_abbr3)
+                                    st.session_state[_ros_auto_key] = True
                                     st.rerun()
 
                             # ── Detail panel ───────────────────────
@@ -4976,7 +5015,7 @@ def main():
                                         st.image(logo3, width=80)
                                 with hc2:
                                     st.markdown(f"### {team_name3}")
-                                    st.caption(f"**{team_abbr3}**  ·  Click **📥 Load Detail** to fetch full info.")
+                                    st.caption(f"**{team_abbr3}**  ·  Detail is loading…")
                             else:
                                 # ── Team header ────────────────────
                                 logo3 = det3.get('logo_url') or sel_row3.get('logo_url', '')
@@ -5062,7 +5101,7 @@ def main():
                             with ros_tab:
                                 df_roster3 = db.get_roster_df(sel_ep3, sel_tid3)
                                 if df_roster3.empty:
-                                    st.info("Roster not loaded yet — click **📋 Load Roster** above.")
+                                    st.info("Roster is loading… if it doesn't appear, click **🔄 Refresh Roster** above.")
                                 else:
                                     st.caption(f"{len(df_roster3)} players  ·  "
                                                f"fetched {str(df_roster3['fetched_at'].iloc[0])[:16]}")
