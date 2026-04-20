@@ -1,5 +1,6 @@
 import requests
 import json
+import re
 import sqlite3
 import time
 import threading
@@ -9,7 +10,7 @@ import pathlib
 import shutil
 import logging
 from datetime import datetime, timedelta, date
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Tuple
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
@@ -42,6 +43,88 @@ def _flatten_json(obj: Any, prefix: str = '', depth: int = 0,
         vtype = 'null' if obj is None else type(obj).__name__
         result[prefix] = (vtype, '' if obj is None else str(obj)[:150])
     return result
+
+
+def _schema_extract_to_df(
+    url: str,
+    params: dict,
+    field_paths: List[str],
+) -> Tuple[pd.DataFrame, Optional[str]]:
+    """
+    Fetch a URL, detect the root array from field_paths, iterate every
+    element of that array, extract the selected sub-paths as columns,
+    and return (DataFrame, error_string|None).
+
+    Example path:  'events[0].competitions[0].competitors[0].team.abbreviation'
+    Root array:    'events'
+    Per-item path: 'competitions[0].competitors[0].team.abbreviation'
+
+    If no root array is detected (path starts with a plain key), the
+    whole JSON object is treated as a single row.
+    """
+
+    def _nav(obj: Any, path: str) -> Any:
+        """Navigate dot/bracket path on a nested dict/list."""
+        for seg in re.split(r'[.\[]', path):
+            seg = seg.rstrip(']')
+            if not seg:
+                continue
+            try:
+                obj = obj[int(seg)] if seg.isdigit() else obj[seg]
+            except (KeyError, IndexError, TypeError):
+                return None
+        return obj
+
+    def _root_and_sub(path: str) -> Tuple[Optional[str], str]:
+        """Split 'root[0].rest.of.path' → ('root', 'rest.of.path')."""
+        m = re.match(r'^(\w+)\[0\](\.(.+))?$', path)
+        if m:
+            return m.group(1), m.group(3) or ''
+        return None, path
+
+    try:
+        hdrs = {'User-Agent': 'Mozilla/5.0 (TrulySporting/1.0)'}
+        resp = requests.get(url, params=params, headers=hdrs, timeout=25)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        return pd.DataFrame(), str(exc)
+
+    # Determine root array — first one found across all selected paths
+    root_key: Optional[str] = None
+    for fp in field_paths:
+        rk, _ = _root_and_sub(fp)
+        if rk and rk in data and isinstance(data.get(rk), list):
+            root_key = rk
+            break
+
+    def _safe_col(fp: str) -> str:
+        """Human-readable column name: use the last 2-3 non-index segments."""
+        parts = [p.rstrip(']') for p in re.split(r'[.\[]', fp) if p.rstrip(']') and not p.rstrip(']').isdigit()]
+        return '.'.join(parts[-3:]) if len(parts) >= 3 else '.'.join(parts) or fp
+
+    if root_key:
+        root_arr = data[root_key]
+        prefix = f'{root_key}[0].'
+        rows = []
+        for item in root_arr:
+            if not isinstance(item, dict):
+                continue
+            row: Dict[str, Any] = {}
+            for fp in field_paths:
+                col = _safe_col(fp)
+                if fp.startswith(prefix):
+                    row[col] = _nav(item, fp[len(prefix):])
+                elif fp == f'{root_key}[0]':
+                    row[col] = str(item)[:80]
+                else:
+                    row[col] = _nav(data, fp)
+            rows.append(row)
+        return pd.DataFrame(rows), None
+    else:
+        # Single-object response (e.g. team_detail)
+        row = {_safe_col(fp): _nav(data, fp) for fp in field_paths}
+        return pd.DataFrame([row]), None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -7513,7 +7596,23 @@ def main():
         _cx    = cfg.get('chart_x', '')
         _cy    = cfg.get('chart_y', '')
 
-        _df = _cvb_load_df(_sport, _src)
+        # ── schema_live: re-fetch the ESPN endpoint using stored field list ──
+        if _src == 'schema_live':
+            _sl_url    = cfg.get('schema_url', '')
+            _sl_params = cfg.get('schema_params', {})
+            _sl_fields = cfg.get('schema_fields', [])
+            _sl_keep   = cfg.get('keep_cols', [])
+            if not (_sl_url and _sl_fields):
+                _out.warning("This view has no stored ESPN URL or field list — cannot re-fetch.")
+                return
+            _df, _err = _schema_extract_to_df(_sl_url, _sl_params, _sl_fields)
+            if _err:
+                _out.error(f"Live fetch failed: {_err}")
+                return
+            if _sl_keep:
+                _df = _df[[c for c in _sl_keep if c in _df.columns]]
+        else:
+            _df = _cvb_load_df(_sport, _src)
 
         if _df.empty:
             _out.info("No data available. Ensure this league has been synced first.")
@@ -7670,12 +7769,14 @@ def main():
             )
 
             # ── Field Explorer ─────────────────────────────────────
-            st.markdown("#### Field Explorer")
+            st.markdown("#### 🔎 Field Explorer")
             st.caption(
-                "Search for any ESPN field by name. "
-                "Use this to discover data ESPN exposes but we don't yet parse."
+                "Browse every discovered JSON field. "
+                "Filter by sport, endpoint type, or keyword, then use the "
+                "**📡 Live Query Builder** below to pick any combination of fields "
+                "and fetch real multi-row data straight from ESPN."
             )
-            _fe1, _fe2, _fe3 = st.columns([2, 2, 2])
+            _fe1, _fe2, _fe3, _fe4 = st.columns([2, 2, 2, 1])
             with _fe1:
                 _fe_sport_opts = ['(all)'] + sorted(
                     _df_summary['sport_key'].unique().tolist())
@@ -7687,8 +7788,14 @@ def main():
             with _fe3:
                 _fe_search = st.text_input(
                     "Search JSON path",
-                    placeholder="e.g. odds, weather, venue, capacity…",
-                    key='fe_search'
+                    placeholder="e.g. odds, weather, venue, spread…",
+                    key='fe_search',
+                )
+            with _fe4:
+                st.write("")
+                _fe_hv_only = st.checkbox(
+                    "⭐ High-value only", key='fe_hv_only',
+                    help="Only show fields likely to contain actionable data",
                 )
 
             _df_fields = db.get_schema_df(
@@ -7701,9 +7808,21 @@ def main():
                         _fe_search, case=False, na=False)
                 ]
 
+            _HIGH_VALUE_KW = [
+                'odds', 'weather', 'neutral', 'conference', 'ticket', 'capacity',
+                'playoff', 'seed', 'premium', 'story', 'keyword', 'franchise',
+                'injury', 'returnDate', 'lastFiveGames', 'geoBroadcast',
+                'pickcenter', 'standingSummary', 'nextEvent',
+            ]
+            if _fe_hv_only:
+                _hv_mask_pre = _df_fields['field_path'].str.lower().str.contains(
+                    '|'.join(_HIGH_VALUE_KW), na=False)
+                _df_fields = _df_fields[_hv_mask_pre]
+
             _fe_show_cols = [
                 'sport_key', 'endpoint_type', 'field_path',
-                'value_type', 'example_value']
+                'value_type', 'example_value',
+            ]
             _fe_col_rename = {
                 'sport_key': 'Sport', 'endpoint_type': 'Endpoint',
                 'field_path': 'JSON Path', 'value_type': 'Type',
@@ -7711,21 +7830,23 @@ def main():
             }
 
             if not _df_fields.empty:
-                st.caption(f"{len(_df_fields):,} fields match")
+                _fe_n = len(_df_fields)
+                st.caption(
+                    f"**{_fe_n:,} fields** visible — "
+                    "click any column header to sort. "
+                    "Scroll down to **📡 Live Query Builder** to select fields for fetching."
+                )
                 st.dataframe(
                     _df_fields[_fe_show_cols].rename(columns=_fe_col_rename),
-                    use_container_width=True, hide_index=True, height=420,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(460, max(180, min(_fe_n, 14) * 35 + 38)),
                 )
 
-                _HIGH_VALUE_KW = [
-                    'odds', 'weather', 'neutral', 'conference', 'ticket', 'capacity',
-                    'playoff', 'seed', 'premium', 'story', 'keyword', 'franchise',
-                    'injury', 'returnDate', 'lastFiveGames', 'geoBroadcast',
-                    'pickcenter', 'standingSummary', 'nextEvent',
-                ]
+                # ── High-value expander ────────────────────────┐
                 _mask_hv = _df_fields['field_path'].str.lower().str.contains(
                     '|'.join(_HIGH_VALUE_KW), na=False)
-                if _mask_hv.any():
+                if _mask_hv.any() and not _fe_hv_only:
                     with st.expander(
                         f"⭐ High-value / parser-worthy fields "
                         f"({_mask_hv.sum()} found)"
@@ -7739,8 +7860,162 @@ def main():
                                 columns=_fe_col_rename),
                             use_container_width=True, hide_index=True,
                         )
+
+                # ── 📡 Live Query Builder ───────────────────────
+                _lqb_key_sfx = f"{_fe_sel_sk}__{_fe_sel_et}".replace('/', '_')
+
+                with st.expander(
+                    "📡 **Live Query Builder** — pick fields → fetch real rows from ESPN",
+                    expanded=bool(st.session_state.get('schema_live_result')),
+                ):
+                    st.caption(
+                        "Select any fields from the catalog above "
+                        "(all **{:,}** are available — type to search inside the picker). "
+                        "The app hits the ESPN endpoint live and returns a proper "
+                        "multi-row table — one row per game, team, or standing entry.".format(_fe_n)
+                    )
+
+                    # ── Quick-select by prefix group (tick a group → all its fields land in multiselect)
+                    _all_paths = _df_fields['field_path'].tolist()
+                    _prefix_map: Dict[str, List[str]] = {}
+                    for _fp in _all_paths:
+                        _segs = [s.rstrip(']') for s in re.split(r'[.\[]', _fp) if s]
+                        _grp_parts = [s for s in _segs[:6] if not s.isdigit()][:3]
+                        _grp = '.'.join(_grp_parts) or '(root)'
+                        _prefix_map.setdefault(_grp, []).append(_fp)
+
+                    _sorted_groups = sorted(
+                        _prefix_map.items(),
+                        key=lambda x: (-len(x[1]), x[0]),
+                    )[:20]
+
+                    if _sorted_groups:
+                        st.markdown("**Quick-select entire field groups** (check → appends to picker below):")
+                        _n_grp_cols = min(4, len(_sorted_groups))
+                        _grp_col_widgets = st.columns(_n_grp_cols)
+                        _preselected_from_groups: List[str] = []
+                        for _gi, (_grp, _grp_paths) in enumerate(_sorted_groups):
+                            with _grp_col_widgets[_gi % _n_grp_cols]:
+                                if st.checkbox(
+                                    f"{_grp} ({len(_grp_paths)})",
+                                    key=f'lqb_grp_{_gi}_{_lqb_key_sfx}',
+                                    help=f"Adds all {len(_grp_paths)} fields under `{_grp}` to the selection.",
+                                ):
+                                    _preselected_from_groups.extend(_grp_paths)
+
+                        _preselected_from_groups = list(dict.fromkeys(_preselected_from_groups))
+                    else:
+                        _preselected_from_groups = []
+
+                    st.markdown("**Select individual fields** (search inside the picker):")
+                    _lqb_sel = st.multiselect(
+                        f"Fields to extract ({_fe_n:,} available — start typing or tick groups above)",
+                        options=_all_paths,
+                        default=[p for p in _preselected_from_groups if p in _all_paths][:80],
+                        key=f'lqb_fields_{_lqb_key_sfx}',
+                        help=(
+                            "Every selected path becomes one column in the output table. "
+                            "Column names are shortened to the last 3 path segments automatically."
+                        ),
+                        placeholder="Type any part of a field name to search…",
+                    )
+
+                    # ── Resolve URL + params ──────────────────────
+                    _lqb_url: Optional[str] = None
+                    _lqb_params: Dict = {}
+                    if 'url' in _df_fields.columns:
+                        _lqb_url_series = _df_fields['url'].dropna()
+                        if not _lqb_url_series.empty:
+                            _lqb_url = _lqb_url_series.iloc[0]
+                    if _lqb_url:
+                        for _lqb_ep in crawler.build_endpoints():
+                            if (
+                                _lqb_ep['url'] == _lqb_url
+                                and _lqb_ep['sport_key'] == _fe_sel_sk
+                            ):
+                                _lqb_params = _lqb_ep.get('params', {})
+                                break
+                        st.caption(
+                            f"🌐 Source: `{_lqb_url}`"
+                            + (f"  params: `{_lqb_params}`" if _lqb_params else "")
+                        )
+                    else:
+                        st.warning(
+                            "Select a specific **Sport** and **Endpoint** (not '(all)') "
+                            "so the Live Query Builder knows which URL to hit.",
+                            icon="⚠️",
+                        )
+
+                    _lqb_n_sel = len(_lqb_sel)
+                    _lqb_btnc, _lqb_infoc = st.columns([2, 4])
+                    with _lqb_btnc:
+                        _do_lqb = st.button(
+                            f"📡 Fetch Live Data ({_lqb_n_sel} fields)",
+                            key=f'lqb_fetch_{_lqb_key_sfx}',
+                            disabled=not (_lqb_sel and _lqb_url),
+                            type='primary',
+                            help="Fetches the ESPN endpoint now and extracts selected paths as rows.",
+                        )
+                    with _lqb_infoc:
+                        if not _lqb_sel:
+                            st.caption("Pick at least one field to enable fetch.")
+                        elif not _lqb_url:
+                            st.caption("Set Sport + Endpoint above to enable fetch.")
+                        else:
+                            st.caption(
+                                f"Ready — will fetch `{_fe_sel_et}` for `{_fe_sel_sk}` "
+                                f"and extract **{_lqb_n_sel}** columns."
+                            )
+
+                    if _do_lqb:
+                        with st.spinner(f"Fetching {_lqb_url}…"):
+                            _lqb_df, _lqb_err = _schema_extract_to_df(
+                                _lqb_url, _lqb_params, _lqb_sel,
+                            )
+                        if _lqb_err:
+                            st.error(f"Fetch failed: {_lqb_err}")
+                        elif _lqb_df.empty:
+                            st.warning(
+                                "Fetch succeeded but produced 0 rows. "
+                                "Check that the selected field paths share a common root array "
+                                "(e.g. all under `events[0].*`)."
+                            )
+                        else:
+                            st.session_state['schema_live_result'] = {
+                                'df':          _lqb_df,
+                                'fields':      _lqb_sel,
+                                'source_info': f"{_fe_sel_sk} / {_fe_sel_et}",
+                                'url':         _lqb_url,
+                                'params':      _lqb_params,
+                            }
+                            st.success(
+                                f"✅ {len(_lqb_df):,} rows × {len(_lqb_df.columns)} columns fetched. "
+                                "Scroll down to the **📡 Use Schema Live Data** panel "
+                                "in the Custom View Builder to chart and save it."
+                            )
+                            st.rerun()
+
+                    # Preview any cached result inside the expander
+                    _lqb_cached = st.session_state.get('schema_live_result')
+                    if _lqb_cached:
+                        st.markdown("---")
+                        st.markdown(
+                            f"**Cached result:** {_lqb_cached['source_info']} — "
+                            f"{len(_lqb_cached['df']):,} rows × "
+                            f"{len(_lqb_cached['df'].columns)} cols"
+                        )
+                        st.dataframe(
+                            _lqb_cached['df'],
+                            use_container_width=True,
+                            hide_index=True,
+                            height=260,
+                        )
+                        if st.button("🗑 Clear result", key=f'lqb_clear_{_lqb_key_sfx}'):
+                            if 'schema_live_result' in st.session_state:
+                                del st.session_state['schema_live_result']
+                            st.rerun()
             else:
-                st.info("No fields match your filter — try a shorter search term.")
+                st.info("No fields match your filter — try a shorter search term or a different endpoint.")
         else:
             st.info(
                 "No schema data yet. Click **🕷 Crawl Endpoints** above "
@@ -7753,10 +8028,9 @@ def main():
         st.divider()
         st.markdown("### 📋 Custom View Builder")
         st.caption(
-            "Build any chart or table directly from **your stored data** — "
-            "no ESPN calls needed. Column pickers always reflect real DB columns. "
-            "Data sources: game history, standings, rankings, teams, roster, "
-            "player stats, play-by-play, news, and more."
+            "Build charts and tables from **stored DB data** or from "
+            "**live ESPN JSON** (fetched by the Live Query Builder above). "
+            "Column pickers always show real fields — never placeholders."
         )
 
         _cv_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'custom_views')
@@ -7764,6 +8038,191 @@ def main():
 
         if 'cv_session_views' not in st.session_state:
             st.session_state['cv_session_views'] = []
+
+        # ── Schema Live Data panel ─────────────────────────────────
+        _slr = st.session_state.get('schema_live_result')
+        if _slr:
+            _slr_df   = _slr['df']
+            _slr_cols = list(_slr_df.columns)
+            _slr_ncols = [c for c in _slr_cols
+                          if pd.api.types.is_numeric_dtype(_slr_df[c])]
+            with st.expander(
+                f"📡 Use Schema Live Data — {_slr['source_info']} "
+                f"({len(_slr_df):,} rows × {len(_slr_cols)} cols)",
+                expanded=True,
+            ):
+                st.caption(
+                    "This data was fetched live from ESPN in the Field Explorer above. "
+                    "Configure it as a view, download it as CSV, or save it to disk."
+                )
+                _sla1, _sla2, _sla3 = st.columns([3, 3, 2])
+                with _sla1:
+                    _sl_name = st.text_input(
+                        "View Name *",
+                        placeholder="e.g. EPL Match Odds",
+                        key='sl_name',
+                    )
+                    _sl_desc = st.text_input(
+                        "Description (optional)",
+                        key='sl_desc',
+                    )
+                with _sla2:
+                    _sl_chart = st.selectbox(
+                        "Display As",
+                        ['table', 'bar_chart', 'line_chart', 'scatter', 'metric_cards'],
+                        key='sl_chart',
+                    )
+                    _sl_need_axes = _sl_chart in (
+                        'bar_chart', 'line_chart', 'scatter', 'metric_cards')
+                with _sla3:
+                    _sl_fcol_raw = st.selectbox(
+                        "Filter column (optional)",
+                        ['(none)'] + _slr_cols,
+                        key='sl_fcol',
+                    )
+                    _sl_filter_col = '' if _sl_fcol_raw == '(none)' else _sl_fcol_raw
+
+                _slb1, _slb2 = st.columns(2)
+                with _slb1:
+                    if _sl_need_axes:
+                        _sl_cx = st.selectbox("X axis / Label column", _slr_cols, key='sl_cx')
+                    else:
+                        _sl_cx = ''
+                        st.caption("*X/Y not needed for table view*")
+                with _slb2:
+                    if _sl_need_axes:
+                        _sl_cy = st.selectbox(
+                            "Y axis / Value column",
+                            _slr_ncols if _slr_ncols else _slr_cols,
+                            key='sl_cy',
+                        )
+                    else:
+                        _sl_cy = ''
+
+                _sl_filter_val = ''
+                if _sl_filter_col and _sl_filter_col in _slr_df.columns:
+                    _sl_fv_opts = sorted(
+                        _slr_df[_sl_filter_col].dropna().astype(str)
+                        .unique().tolist()[:80]
+                    )
+                    if _sl_fv_opts:
+                        _sl_fv_sel = st.selectbox(
+                            f"Filter value for `{_sl_filter_col}`",
+                            ['(all)'] + _sl_fv_opts,
+                            key='sl_fval',
+                        )
+                        _sl_filter_val = '' if _sl_fv_sel == '(all)' else _sl_fv_sel
+
+                # Column visibility picker
+                _sl_keep = st.multiselect(
+                    "Columns to keep in saved view (deselect to hide)",
+                    options=_slr_cols,
+                    default=_slr_cols,
+                    key='sl_keep_cols',
+                )
+
+                # Preview
+                st.markdown("##### 🔍 Preview")
+                _sl_pv_df = _slr_df.copy()
+                if _sl_filter_col and _sl_filter_val and _sl_filter_col in _sl_pv_df.columns:
+                    _sl_pv_df = _sl_pv_df[
+                        _sl_pv_df[_sl_filter_col].astype(str).str.contains(
+                            _sl_filter_val, case=False, na=False)
+                    ]
+                if _sl_keep:
+                    _sl_pv_df = _sl_pv_df[[c for c in _sl_keep if c in _sl_pv_df.columns]]
+
+                if _sl_chart == 'table' or not _sl_need_axes:
+                    st.dataframe(
+                        _sl_pv_df,
+                        use_container_width=True, hide_index=True, height=300,
+                    )
+                elif _sl_chart in ('bar_chart', 'line_chart', 'scatter'):
+                    if _sl_cx in _sl_pv_df.columns and _sl_cy in _sl_pv_df.columns:
+                        _sl_fig = go.Figure()
+                        _sl_x = _sl_pv_df[_sl_cx].tolist()
+                        _sl_y = _sl_pv_df[_sl_cy].tolist()
+                        if _sl_chart == 'bar_chart':
+                            _sl_fig.add_trace(go.Bar(x=_sl_x, y=_sl_y))
+                        elif _sl_chart == 'line_chart':
+                            _sl_fig.add_trace(go.Scatter(
+                                x=_sl_x, y=_sl_y, mode='lines+markers'))
+                        else:
+                            _sl_fig.add_trace(go.Scatter(
+                                x=_sl_x, y=_sl_y, mode='markers'))
+                        _sl_fig.update_layout(
+                            xaxis_title=_sl_cx, yaxis_title=_sl_cy,
+                            height=400, margin=dict(l=40, r=20, t=30, b=60),
+                        )
+                        st.plotly_chart(_sl_fig, use_container_width=True)
+                    else:
+                        st.info("Select valid X and Y columns above.")
+                elif _sl_chart == 'metric_cards':
+                    if _sl_cx and _sl_cy:
+                        _sl_mc = st.columns(min(5, max(1, len(_sl_pv_df))))
+                        for _sl_i, (_, _sl_r) in enumerate(_sl_pv_df.head(5).iterrows()):
+                            with _sl_mc[_sl_i]:
+                                st.metric(
+                                    str(_sl_r.get(_sl_cx, '—')),
+                                    str(_sl_r.get(_sl_cy, '—')),
+                                )
+
+                st.markdown("---")
+                _sl_c1, _sl_c2, _sl_c3 = st.columns(3)
+
+                def _sl_build_cfg():
+                    return dict(
+                        name=(_sl_name or '').strip(),
+                        description=(_sl_desc or '').strip(),
+                        sport_key=_slr['source_info'],
+                        data_source='schema_live',
+                        chart_type=_sl_chart,
+                        chart_x=_sl_cx if isinstance(_sl_cx, str) else '',
+                        chart_y=_sl_cy if isinstance(_sl_cy, str) else '',
+                        filter_col=_sl_filter_col,
+                        filter_val=_sl_filter_val if isinstance(_sl_filter_val, str) else '',
+                        schema_fields=_slr['fields'],
+                        schema_url=_slr['url'],
+                        schema_params=_slr.get('params', {}),
+                        keep_cols=st.session_state.get('sl_keep_cols', _slr_cols),
+                    )
+
+                with _sl_c1:
+                    if st.button("💾 Add to Session", key='sl_ses'):
+                        if not (_sl_name or '').strip():
+                            st.error("View Name is required.")
+                        else:
+                            st.session_state['cv_session_views'].append(_sl_build_cfg())
+                            st.success(f"✅ \"{_sl_name}\" added to session.")
+                            st.rerun()
+                with _sl_c2:
+                    if st.button("📁 Save to Disk", key='sl_disk'):
+                        if not (_sl_name or '').strip():
+                            st.error("View Name is required.")
+                        else:
+                            _sl_cfg = _sl_build_cfg()
+                            _sl_safe = "".join(
+                                c if c.isalnum() or c in '._- ' else '_'
+                                for c in _sl_cfg['name']
+                            ).replace(' ', '_')[:60]
+                            _sl_path = os.path.join(_cv_dir, f"{_sl_safe}.json")
+                            with open(_sl_path, 'w', encoding='utf-8') as _slf:
+                                json.dump(_sl_cfg, _slf, indent=2)
+                            st.session_state['cv_session_views'].append(_sl_cfg)
+                            st.success(
+                                f"✅ Saved to `{_sl_path}`. "
+                                "Appears on the **📋 Custom Views** tab."
+                            )
+                            st.rerun()
+                with _sl_c3:
+                    _dl_df = _sl_pv_df
+                    st.download_button(
+                        "📥 Download CSV",
+                        data=_dl_df.to_csv(index=False).encode('utf-8'),
+                        file_name=f"{(_sl_name or 'schema_view').replace(' ', '_')}.csv",
+                        mime='text/csv',
+                        key='sl_csv',
+                    )
 
         # ── Sub-section: DB snapshot — what data do we actually have? ──
         with st.expander("📦 What's in your local database?", expanded=False):
