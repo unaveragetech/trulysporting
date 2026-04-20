@@ -4289,44 +4289,79 @@ def _render_tos():
 
 def _render_donation_page():
     """Donation / support page rendered inside the Support tab."""
+
+    # ── Hero ──────────────────────────────────────────────────
     st.html("""
-    <div style="text-align:center;padding:36px 20px 20px">
-      <div style="font-size:60px;margin-bottom:8px">💚</div>
-      <h1 style="font-size:2.2rem;font-weight:900;color:#1a1a2e;margin:0 0 8px">
+    <div style="text-align:center;padding:40px 20px 12px">
+      <div style="font-size:64px;margin-bottom:10px">💚</div>
+      <h1 style="font-size:2.3rem;font-weight:900;color:#1a1a2e;margin:0 0 10px">
         Support TrulySporting
       </h1>
-      <p style="color:#555;font-size:1rem;max-width:560px;margin:0 auto;line-height:1.7">
-        TrulySporting is a <strong>free, independent</strong> sports analytics platform.
-        If you find it useful, a small donation helps keep the servers running and
-        new features coming.
+      <p style="color:#555;font-size:1.05rem;max-width:600px;margin:0 auto;line-height:1.75">
+        A <strong>free, open-source</strong> sports analytics platform built by one developer —
+        no VC funding, no paywalls, no data selling. Just code and passion.
       </p>
     </div>
     """)
 
-    col_l, col_c, col_r = st.columns([1, 2, 1])
-    with col_c:
-        st.html("""
-        <a href="https://cash.app/$slightlysigh" target="_blank" rel="noopener noreferrer"
-           style="display:block;text-decoration:none">
-          <div style="background:linear-gradient(135deg,#00d632 0%,#00a825 100%);
-                      border-radius:16px;padding:28px 24px;text-align:center;
-                      box-shadow:0 6px 24px rgba(0,214,50,0.3);cursor:pointer">
-            <div style="font-size:48px;margin-bottom:8px">$</div>
-            <div style="font-size:22px;font-weight:900;color:#fff;margin-bottom:4px">
-              Donate via Cash App
-            </div>
-            <div style="font-size:15px;color:rgba(255,255,255,0.85);margin-bottom:16px">
-              $slightlysigh
-            </div>
-            <div style="background:rgba(255,255,255,0.95);color:#00a825;font-weight:800;
-                        font-size:15px;border-radius:50px;padding:10px 32px;
-                        display:inline-block;letter-spacing:0.3px">
-              Open Cash App &rarr;
-            </div>
-          </div>
-        </a>
-        """)
+    # ── Origin story ─────────────────────────────────────────
+    st.html("""
+    <div style="max-width:780px;margin:28px auto;background:#fafafa;
+                border-left:4px solid #00d632;border-radius:0 12px 12px 0;
+                padding:24px 28px">
+      <h2 style="font-size:1.2rem;font-weight:800;color:#1a1a2e;margin:0 0 14px">
+        🌱 How it started
+      </h2>
+      <p style="color:#444;line-height:1.8;margin:0 0 12px;font-size:0.97rem">
+        TrulySporting began as the simplest possible idea: <em>collect sports data → display it →
+        share it</em>. A handful of Python lines hitting ESPN's public API and printing scores
+        in a terminal. That was it.
+      </p>
+      <p style="color:#444;line-height:1.8;margin:0 0 12px;font-size:0.97rem">
+        The data kept coming. Game histories. Standings. Rankings. Rosters. Box scores.
+        Play-by-play. Odds. Weather. Injuries. News. Each new source begged for a better
+        display — so a Streamlit UI appeared. Then charts. Then filters. Then custom views.
+      </p>
+      <p style="color:#444;line-height:1.8;margin:0;font-size:0.97rem">
+        Today TrulySporting is a <strong>full analytics platform</strong>: a live scoreboard,
+        team &amp; player trend analysis, roster management, a news feed, league rankings,
+        a network/admin layer, a field schema explorer that can interrogate every JSON path
+        ESPN exposes, and a custom view builder that lets you chart any combination of that
+        data — all running locally, all free, all yours.
+        <br><br>
+        It still started from three words: <strong>collect → display → share</strong>.
+      </p>
+    </div>
+    """)
 
+    # ── Donate button ─────────────────────────────────────────
+    _dc, = st.columns(1)
+    with _dc:
+        col_l, col_c, col_r = st.columns([1, 2, 1])
+        with col_c:
+            st.html("""
+            <a href="https://cash.app/$slightlysigh" target="_blank" rel="noopener noreferrer"
+               style="display:block;text-decoration:none">
+              <div style="background:linear-gradient(135deg,#00d632 0%,#00a825 100%);
+                          border-radius:16px;padding:28px 24px;text-align:center;
+                          box-shadow:0 6px 24px rgba(0,214,50,0.3);cursor:pointer">
+                <div style="font-size:48px;margin-bottom:8px">$</div>
+                <div style="font-size:22px;font-weight:900;color:#fff;margin-bottom:4px">
+                  Donate via Cash App
+                </div>
+                <div style="font-size:15px;color:rgba(255,255,255,0.85);margin-bottom:16px">
+                  $slightlysigh
+                </div>
+                <div style="background:rgba(255,255,255,0.95);color:#00a825;font-weight:800;
+                            font-size:15px;border-radius:50px;padding:10px 32px;
+                            display:inline-block;letter-spacing:0.3px">
+                  Open Cash App &rarr;
+                </div>
+              </div>
+            </a>
+            """)
+
+    # ── What donations do ─────────────────────────────────────
     st.html("""
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;
                 max-width:700px;margin:28px auto 8px;padding:0 16px">
@@ -4351,10 +4386,107 @@ def _render_donation_page():
     </div>
     """)
 
+    # ── Future enhancements + price estimates ─────────────────
     st.html("""
-    <p style="text-align:center;font-size:11px;color:#bbb;margin:16px 0 0">
-      100% of donations go directly to the developer. No obligation whatsoever.
-      TrulySporting will always remain free.
+    <div style="max-width:780px;margin:36px auto 0;padding:0 8px">
+      <h2 style="font-size:1.2rem;font-weight:800;color:#1a1a2e;margin:0 0 6px;
+                 text-align:center">
+        🗺 What's on the roadmap
+      </h2>
+      <p style="text-align:center;color:#666;font-size:0.9rem;margin:0 0 18px">
+        Estimated development cost (honest time × fair hourly rate).
+        Donations help prioritise these — the more interest, the faster they ship.
+      </p>
+      <table style="width:100%;border-collapse:collapse;font-size:0.92rem">
+        <thead>
+          <tr style="background:#1a1a2e;color:#fff">
+            <th style="padding:10px 14px;text-align:left;border-radius:8px 0 0 0">Feature</th>
+            <th style="padding:10px 14px;text-align:left">What it means for you</th>
+            <th style="padding:10px 14px;text-align:right;border-radius:0 8px 0 0;white-space:nowrap">Est. cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="background:#f0fdf4">
+            <td style="padding:10px 14px;font-weight:700;color:#166534">🔔 Game alerts</td>
+            <td style="padding:10px 14px;color:#333">Push / email / SMS when a tracked team scores or a game starts</td>
+            <td style="padding:10px 14px;text-align:right;font-weight:700;color:#166534">~$40</td>
+          </tr>
+          <tr style="background:#fff">
+            <td style="padding:10px 14px;font-weight:700;color:#0c4a6e">📊 Fantasy points engine</td>
+            <td style="padding:10px 14px;color:#333">Auto-calculate fantasy scores from stored box scores for any scoring format</td>
+            <td style="padding:10px 14px;text-align:right;font-weight:700;color:#0c4a6e">~$60</td>
+          </tr>
+          <tr style="background:#f0f9ff">
+            <td style="padding:10px 14px;font-weight:700;color:#0c4a6e">🤖 AI game summaries</td>
+            <td style="padding:10px 14px;color:#333">LLM-generated plain-English recap for every game using stored PBP + box score</td>
+            <td style="padding:10px 14px;text-align:right;font-weight:700;color:#0c4a6e">~$50</td>
+          </tr>
+          <tr style="background:#fdf4ff">
+            <td style="padding:10px 14px;font-weight:700;color:#581c87">📱 Mobile-first layout</td>
+            <td style="padding:10px 14px;color:#333">Responsive card-based UI that works well on phones and tablets</td>
+            <td style="padding:10px 14px;text-align:right;font-weight:700;color:#581c87">~$80</td>
+          </tr>
+          <tr style="background:#fff8f0">
+            <td style="padding:10px 14px;font-weight:700;color:#92400e">📈 Betting edge tracker</td>
+            <td style="padding:10px 14px;color:#333">Track line movement over time from crawled odds data, surface value spots</td>
+            <td style="padding:10px 14px;text-align:right;font-weight:700;color:#92400e">~$70</td>
+          </tr>
+          <tr style="background:#f0fdf4">
+            <td style="padding:10px 14px;font-weight:700;color:#166534">🌍 Multi-language support</td>
+            <td style="padding:10px 14px;color:#333">UI strings in Spanish, French, Portuguese — most ESPN data already exists globally</td>
+            <td style="padding:10px 14px;text-align:right;font-weight:700;color:#166534">~$45</td>
+          </tr>
+          <tr style="background:#f8f0ff">
+            <td style="padding:10px 14px;font-weight:700;color:#581c87">🗄 Multi-user / shared DB</td>
+            <td style="padding:10px 14px;color:#333">Optional cloud sync so a team can share one database and view each other's custom views</td>
+            <td style="padding:10px 14px;text-align:right;font-weight:700;color:#581c87">~$120</td>
+          </tr>
+          <tr style="background:#fff">
+            <td style="padding:10px 14px;font-weight:700;color:#0c4a6e">📦 One-click installer</td>
+            <td style="padding:10px 14px;color:#333">Packaged .exe / .app so non-developers can run TrulySporting without touching the terminal</td>
+            <td style="padding:10px 14px;text-align:right;font-weight:700;color:#0c4a6e">~$55</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="text-align:center;color:#888;font-size:0.8rem;margin:10px 0 0">
+        Estimates are approximate. All funded features ship as open-source updates to everyone.
+      </p>
+    </div>
+    """)
+
+    # ── Open-source / contribute CTA ─────────────────────────
+    st.html("""
+    <div style="max-width:780px;margin:32px auto 8px;
+                background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);
+                border-radius:16px;padding:30px 28px;text-align:center;
+                box-shadow:0 4px 20px rgba(0,0,0,0.18)">
+      <div style="font-size:40px;margin-bottom:10px">🛠</div>
+      <h2 style="font-size:1.15rem;font-weight:800;color:#fff;margin:0 0 10px">
+        Can't donate? Code instead.
+      </h2>
+      <p style="color:rgba(255,255,255,0.75);font-size:0.93rem;
+                line-height:1.75;max-width:560px;margin:0 auto 18px">
+        TrulySporting is <strong style="color:#00d632">fully open-source</strong>.
+        Every feature on the roadmap above is a viable PR.
+        Found a bug? Have a better idea for the schema explorer or custom views?
+        Open an issue, fork the repo, push a branch — the codebase is well-commented
+        and modular by design.
+      </p>
+      <a href="https://github.com/unaveragetech/trulysporting"
+         target="_blank" rel="noopener noreferrer"
+         style="display:inline-block;background:#00d632;color:#fff;font-weight:800;
+                font-size:14px;border-radius:50px;padding:11px 36px;
+                text-decoration:none;letter-spacing:0.3px">
+        ⭐ View on GitHub &rarr;
+      </a>
+    </div>
+    """)
+
+    # ── Footer note ───────────────────────────────────────────
+    st.html("""
+    <p style="text-align:center;font-size:11px;color:#bbb;margin:20px 0 0;line-height:1.8">
+      100% of donations go directly to the developer. No obligation whatsoever.<br>
+      TrulySporting will always remain free and open-source.
     </p>
     """)
 
