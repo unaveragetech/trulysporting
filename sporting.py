@@ -4723,6 +4723,7 @@ def main():
         _render_tab_banner("Scoreboard",
                            "Full-season game browser · Live scores · Box scores · PBP",
                            _ep1)
+        _render_how_it_works('scoreboard')
 
         if not active_eps:
             st.info("Select leagues in the sidebar to get started.")
@@ -4937,6 +4938,7 @@ def main():
     # ── TAB 2: TEAM TRENDS ────────────────────────────────────
     with tab2:
         st.subheader("📈 Team Trend Analyzer")
+        _render_how_it_works('team_trends')
         _t2_active_eps = json.loads(db.get_config('active_endpoints', '[]'))
 
         if not _t2_active_eps:
@@ -5275,6 +5277,7 @@ def main():
         _render_tab_banner("Player Trends",
                            "Team roster · Player profile · Season stats · Game log · PBP",
                            _pt_hdr_ep)
+        _render_how_it_works('player_trends')
 
         if not _pt_active_eps:
             st.info("Add leagues in the sidebar first.")
@@ -5745,6 +5748,7 @@ def main():
     # ── TAB 4: TEAMS ──────────────────────────────────────────
     with tab4:
         st.subheader("Teams")
+        _render_how_it_works('teams')
         active_eps = json.loads(db.get_config('active_endpoints', '[]'))
 
         if not active_eps:
@@ -6129,6 +6133,7 @@ def main():
     # ── TAB 5: NEWS ───────────────────────────────────────────
     with tab5:
         st.subheader("Latest News")
+        _render_how_it_works('news')
         active_eps = json.loads(db.get_config('active_endpoints', '[]'))
 
         if not active_eps:
@@ -6215,6 +6220,7 @@ def main():
     # ── TAB 6: RANKINGS & STANDINGS ──────────────────────────
     with tab6:
         st.subheader("🏆 Rankings & Standings")
+        _render_how_it_works('rankings')
         _r5_all_eps = json.loads(db.get_config('active_endpoints', '[]'))
 
         # ── Shared chart style constants ───────────────────────
@@ -7099,6 +7105,7 @@ def main():
 
     # ── TAB 7: NETWORK / COORDINATOR ─────────────────────────
     with tab7:
+        _render_how_it_works('network')
         _auth_t6 = st.session_state.get('admin_authed', False)
         _pin_t6  = db.get_config('admin_pin', '')
         if not _auth_t6:
@@ -7247,23 +7254,255 @@ def main():
                     st.json(job_stats)
 
     # ── Custom-view helpers (shared by TAB 8 builder & TAB 10 runner) ─────────
+
+    # All data sources the Custom View Builder can draw from.  Keyed by the
+    # string the user selects; value is a human label + description shown in the UI.
+    _CVB_SOURCES = {
+        'game_history':      ('Games / Scoreboard',
+                              'All synced game results — scores, dates, teams, status.'),
+        'standings':         ('Standings',
+                              'Division / conference standings scraped from ESPN.'),
+        'rankings':          ('Rankings',
+                              'AP, Coaches Poll, etc. rankings for college sports.'),
+        'teams':             ('Teams',
+                              'Full team registry — names, abbreviations, logos, colours.'),
+        'roster':            ('Roster / Players',
+                              'Player bio rows loaded via Load Roster on Player Trends.'),
+        'player_stats':      ('Player Boxscore Stats',
+                              'Per-game per-player stats from game summaries (all categories).'),
+        'play_by_play':      ('Play-by-Play',
+                              'Every stored play — text, type, down, clock, score.'),
+        'news':              ('News',
+                              'Headlines and articles fetched from ESPN news feed.'),
+        'team_detail':       ('Team Detail',
+                              'Extended team info (record, venue, coaching staff) from /teams/:id.'),
+        'player_profiles':   ('Player Profiles',
+                              'Cached player profile summaries built on Player Trends tab.'),
+    }
+
     def _cvb_load_df(sport_key: str, data_src: str) -> pd.DataFrame:
-        """Pull stored data from DB — no live ESPN fetch."""
+        """Pull stored data from DB for any supported source — no live ESPN fetch needed."""
         try:
             _cat, _spt = sport_key.split('/', 1) if '/' in sport_key else ('', sport_key)
-            if data_src == 'standings':
+            if data_src == 'game_history' or data_src == 'scoreboard':
+                return db.get_games_df(_cat, _spt)
+            elif data_src == 'standings':
                 return db.get_standings_df(_cat, _spt)
             elif data_src == 'rankings':
                 return db.get_rankings_df(sport_key)
             elif data_src == 'teams':
                 return db.get_teams_df(sport_key)
-            elif data_src == 'scoreboard':
-                return db.get_games_df(_cat, _spt)
+            elif data_src == 'roster':
+                # Flatten all teams' rosters into one DataFrame
+                conn = db.get_connection()
+                df = pd.read_sql_query(
+                    """SELECT player_id, display_name, jersey, position,
+                              position_name, position_group, age, college,
+                              display_height, display_weight, experience,
+                              injury_status, status_name, team_id, team_abbr
+                       FROM roster WHERE sport_key=?
+                       ORDER BY team_abbr, position_group, jersey""",
+                    conn, params=(sport_key,))
+                conn.close()
+                return df
+            elif data_src == 'player_stats':
+                # Flat table: one row per (event, player, category)
+                conn = db.get_connection()
+                df = pd.read_sql_query(
+                    """SELECT p.player_name, p.team_abbr, p.category,
+                              p.stat_labels, p.stat_values, p.game_date,
+                              p.event_id, h.home_team, h.away_team,
+                              h.home_score, h.away_score, h.status
+                       FROM player_game_stats p
+                       LEFT JOIN game_history h ON h.event_id = p.event_id
+                       WHERE p.sport_key=?
+                       ORDER BY p.game_date DESC, p.player_name""",
+                    conn, params=(sport_key,))
+                conn.close()
+                return df
+            elif data_src == 'play_by_play':
+                conn = db.get_connection()
+                df = pd.read_sql_query(
+                    """SELECT p.period, p.clock, p.play_type, p.play_text,
+                              p.team_abbr, p.away_score, p.home_score,
+                              p.scoring_play, p.is_turnover, p.stat_yardage,
+                              p.down, p.distance, p.down_dist_text,
+                              p.event_id,
+                              h.event_date, h.home_team, h.away_team
+                       FROM play_by_play p
+                       LEFT JOIN game_history h ON h.event_id = p.event_id
+                       WHERE p.sport_key=?
+                       ORDER BY h.event_date DESC, p.drive_num, p.sequence_num""",
+                    conn, params=(sport_key,))
+                conn.close()
+                return df
+            elif data_src == 'news':
+                return db.get_news_df(sport_key, limit=500)
+            elif data_src == 'team_detail':
+                return db.get_team_detail_df(sport_key)
+            elif data_src == 'player_profiles':
+                conn = db.get_connection()
+                df = pd.read_sql_query(
+                    """SELECT player_name, player_id, team_abbr,
+                              season_year, sources, built_at
+                       FROM player_profiles WHERE sport_key=?
+                       ORDER BY built_at DESC""",
+                    conn, params=(sport_key,))
+                conn.close()
+                return df
         except Exception:
             pass
         return pd.DataFrame()
 
-    def _cv_run_view(cfg: dict, parent=None):
+    def _cvb_row_count(sport_key: str, data_src: str) -> int:
+        """Quick row-count so the UI can show which sources have data."""
+        try:
+            df = _cvb_load_df(sport_key, data_src)
+            return len(df)
+        except Exception:
+            return 0
+
+    # ── How-It-Works expander placed at the top of every tab ──────────────────
+    _HOW_IT_WORKS = {
+        'scoreboard': {
+            'icon': '🏅',
+            'summary': 'Browse and stream game results for any league you have added.',
+            'steps': [
+                ('1 — Add a league', 'Open the **sidebar** (▶ left edge) → "Manage Leagues" → '
+                 'click **+ Add** next to any league. Active leagues appear across all tabs.'),
+                ('2 — Sync scores',  'Select the league & date, then click **🔄 Sync Scoreboard**. '
+                 'Results are stored locally so they load instantly on repeat visits.'),
+                ('3 — Fetch full detail', 'Click any game row to expand it, then click '
+                 '**📊 Fetch Summary**. This stores box scores, PBP, injuries, betting odds, '
+                 'and win probability — all used by the Players & Schema tabs.'),
+                ('Why is my date blank?', 'The date picker defaults to today. If your league '
+                 'is in off-season, pick a date when games were played and sync again.'),
+            ],
+        },
+        'team_trends': {
+            'icon': '📈',
+            'summary': 'Analyse a team\'s season-over-season form, scoring patterns, and head-to-head records.',
+            'steps': [
+                ('1 — Prerequisite', 'Sync the **Scoreboard** tab for this league first. '
+                 'Team Trends reads from the stored game history table — no live API call needed.'),
+                ('2 — Select league & team', 'Use the dropdowns at the top. If a team is missing, '
+                 'go to the **Teams** tab → Load Teams first.'),
+                ('3 — Pick season', 'Season year follows ESPN convention: football = year the '
+                 'season *starts*; basketball/hockey = year it *ends*.'),
+                ('Why is the chart empty?', 'Sync more scoreboard dates. The chart plots every '
+                 'game in the stored history — the more dates you sync, the richer the view.'),
+            ],
+        },
+        'player_trends': {
+            'icon': '👤',
+            'summary': 'Drill into per-player boxscore stats, game logs, and play-by-play mentions.',
+            'steps': [
+                ('1 — Load Teams', 'Go to the **Teams** tab → select league → **Load Teams**. '
+                 'This fills the team dropdown here.'),
+                ('2 — Load Roster', 'Select a team, then click **🔄 Load Roster**. '
+                 'Players will appear in the dropdown.'),
+                ('3 — Fetch game summaries', 'Go to **Scoreboard** → expand any game → '
+                 '**📊 Fetch Summary**. Do this for multiple games.'),
+                ('4 — Sync Player Stats', 'Click **🔄 Sync Player Stats** (top of this tab) '
+                 'to process all stored summaries into the player boxscore table.'),
+                ('5 — Build Profile', 'Select a player and click **⚙ Build Profile** to '
+                 'aggregate bio, game log, and PBP data into a single cached view.'),
+                ('PBP fallback', 'If no boxscore stats exist, the app auto-derives estimates '
+                 'from play-by-play text (abbreviated names like *S.Darnold*).'),
+            ],
+        },
+        'teams': {
+            'icon': '🏟',
+            'summary': 'Browse full team rosters, records, venues, and coaching staff.',
+            'steps': [
+                ('1 — Add a league', 'Add leagues via the sidebar first.'),
+                ('2 — Load Teams', 'Select a league and click **Load Teams**. '
+                 'This fetches all teams in the league from ESPN and caches them locally.'),
+                ('3 — Load Detail',  'Click any team row to expand it, then **Load Detail** '
+                 'for venue, coaching staff, and season record.'),
+                ('Why are no teams listed?', 'You must click Load Teams at least once per '
+                 'league. Teams are not auto-fetched to avoid unnecessary API calls.'),
+            ],
+        },
+        'news': {
+            'icon': '📰',
+            'summary': 'Latest headlines and full article previews from ESPN\'s news feed.',
+            'steps': [
+                ('1 — Add leagues', 'Add leagues in the sidebar.'),
+                ('2 — Auto-sync', 'News is fetched automatically each time the Scoreboard '
+                 'tab syncs. You can also force a refresh from the sidebar.'),
+                ('3 — Click to read', 'Each headline card links to the full ESPN article.'),
+                ('Missing sport?', 'Not all ESPN endpoints include a news feed '
+                 '(e.g. some international soccer leagues). If the feed is empty, '
+                 'that league\'s ESPN API does not expose a news endpoint.'),
+            ],
+        },
+        'rankings': {
+            'icon': '🏆',
+            'summary': 'Poll rankings (AP, Coaches Poll) and division/conference standings.',
+            'steps': [
+                ('1 — Sync Scoreboard', 'Standings and rankings are fetched as part of the '
+                 'normal scoreboard sync — just sync any date for your league.'),
+                ('2 — Select league', 'Use the league selector at the top of this tab.'),
+                ('Standings vs Rankings', 'Standings (wins/losses) are available for all '
+                 'leagues. Poll Rankings (AP 25 etc.) are only available for college sports.'),
+                ('Why empty?', 'If standings are missing, the league may not be in-season '
+                 'or the standings endpoint may not be available for that sport.'),
+            ],
+        },
+        'network': {
+            'icon': '🌐',
+            'summary': 'Monitor the distributed job queue — worker nodes, pending jobs, and errors.',
+            'steps': [
+                ('What is this?', 'TrulySporting can run multiple data-fetching workers '
+                 'across machines. This tab shows the health of that network.'),
+                ('Local mode', 'If you\'re running a single machine, you\'ll '
+                 'see one local node and a queue that clears quickly.'),
+                ('Stuck jobs?', 'If jobs stay "pending" for a long time, the worker '
+                 'process may have restarted. Click the local sync buttons on other '
+                 'tabs to re-process them.'),
+            ],
+        },
+        'schema': {
+            'icon': '🔬',
+            'summary': 'Discover every JSON field ESPN returns and build custom data views from them.',
+            'steps': [
+                ('1 — Crawl endpoints', 'Click **🕷 Crawl Endpoints** to fetch every ESPN '
+                 'API endpoint once and record ALL JSON field paths, types, and example values. '
+                 'This takes ~30 seconds and only needs to be done once (or after ESPN updates their API).'),
+                ('2 — Browse fields', 'Use the Field Explorer to search by field name. '
+                 'Find hidden ESPN data your parsers don\'t extract yet.'),
+                ('3 — Build a View', 'Scroll to **Custom View Builder**. Pick a league, '
+                 'a *data source* (any stored DB table), columns, chart type, and optional '
+                 'filter. Preview updates live. Save to disk or session.'),
+                ('Data Sources', 'The view builder reads **directly from your local DB** — '
+                 'not from ESPN live. Sources: Game History, Standings, Rankings, Teams, '
+                 'Roster, Player Boxscore Stats, Play-by-Play, News, Team Detail.'),
+                ('Why are columns empty?', 'A data source shows "(0 rows)" if that table '
+                 'has no data for the selected league yet. Sync or load the relevant tab first.'),
+                ('Saved views', 'Views saved to disk appear on the **📋 Custom Views** tab '
+                 'and persist across app restarts.'),
+            ],
+        },
+    }
+
+    def _render_how_it_works(key: str):
+        """Render a collapsible ℹ️ How this tab works expander using _HOW_IT_WORKS dict."""
+        info = _HOW_IT_WORKS.get(key)
+        if not info:
+            return
+        with st.expander(
+            f"{info['icon']} **How this tab works** — click to expand",
+            expanded=False
+        ):
+            st.markdown(f"**{info['summary']}**")
+            st.markdown("")
+            for heading, body in info['steps']:
+                st.markdown(f"**{heading}**")
+                st.markdown(f"> {body}")
+                st.markdown("")
+
+    def _cv_run_view(cfg, parent=None):
         """Render a single custom view config. Pass parent=st for root, or a column."""
         _out = parent if parent is not None else st
         _sport = cfg.get('sport_key', '')
@@ -7341,325 +7580,416 @@ def main():
 
     # ── TAB 8: SCHEMA EXPLORER ────────────────────────────────
     with tab8:
-        st.subheader("Field Schema Explorer")
+        _render_tab_banner(
+            "Schema Explorer & View Builder",
+            "Discover every ESPN JSON field · Build custom data views from any stored table",
+        )
+        _render_how_it_works('schema')
+
+        # ════════════════════════════════════════════════════════════
+        # SECTION 1 — Field Schema Crawler
+        # ════════════════════════════════════════════════════════════
+        st.markdown("### 🕷 Field Schema Crawler")
         st.caption(
-            "Crawls every ESPN endpoint and discovers ALL available JSON fields — "
-            "including data our parsers don't yet extract. "
-            "New fields found here are automatically used in game cards (odds, weather, flags)."
+            "Fetches every ESPN API endpoint and walks the full JSON response "
+            "recursively — recording every field path, data type, and an example value. "
+            "Crawl once; re-crawl only when ESPN updates their API."
         )
 
         crawler = SchemaCrawler(db)
         all_crawl_eps = crawler.build_endpoints()
 
-        sc1, sc2, sc3 = st.columns([3, 1, 1])
-        with sc1:
-            crawl_sport_filter = st.multiselect(
-                "Limit crawl to sport(s)",
+        _sc_c1, _sc_c2, _sc_c3 = st.columns([3, 1, 1])
+        with _sc_c1:
+            _crawl_sport_filter = st.multiselect(
+                "Limit crawl to sport(s) — leave blank for all",
                 EndpointRegistry.get_all_keys(),
                 default=[],
-                placeholder="Leave blank to crawl all endpoints",
+                placeholder="All endpoints",
                 key='schema_sport_filter',
             )
-        with sc2:
+        with _sc_c2:
             st.write("")
-            do_crawl = st.button("🕷 Crawl Endpoints", key='schema_crawl_btn')
-        with sc3:
+            _do_crawl = st.button("🕷 Crawl Endpoints", key='schema_crawl_btn',
+                                  help="Fetch all ESPN endpoints and store field catalog")
+        with _sc_c3:
             st.write("")
             if st.button("🗑 Clear Schema DB", key='schema_clear_btn'):
                 db.clear_schema()
                 st.success("Schema cleared.")
                 st.rerun()
 
-        if do_crawl:
-            eps_to_crawl = [
+        if _do_crawl:
+            _eps_to_crawl = [
                 e for e in all_crawl_eps
-                if not crawl_sport_filter or e['sport_key'] in crawl_sport_filter
+                if not _crawl_sport_filter or e['sport_key'] in _crawl_sport_filter
             ]
-            prog = st.progress(0.0, text="Initialising…")
-            status_ph = st.empty()
-            crawl_ok, crawl_fail, total_fields = 0, 0, 0
-            for i, ep in enumerate(eps_to_crawl):
-                prog.progress((i + 1) / len(eps_to_crawl),
-                               text=f"[{i+1}/{len(eps_to_crawl)}] {ep['key']}")
-                status_ph.caption(f"🌐 {ep['url'][:90]}")
+            _sc_prog = st.progress(0.0, text="Initialising…")
+            _sc_ph   = st.empty()
+            _crawl_ok, _crawl_fail, _total_fields = 0, 0, 0
+            for _sci, _ep in enumerate(_eps_to_crawl):
+                _sc_prog.progress(
+                    (_sci + 1) / len(_eps_to_crawl),
+                    text=f"[{_sci+1}/{len(_eps_to_crawl)}] {_ep['key']}"
+                )
+                _sc_ph.caption(f"🌐 {_ep['url'][:90]}")
                 try:
-                    r = crawler.session.get(ep['url'], params=ep['params'], timeout=20)
-                    r.raise_for_status()
-                    data = r.json()
-                    fields = _flatten_json(data)
-                    db.save_schema_fields(ep['sport_key'], ep['endpoint_type'],
-                                          ep['url'], fields)
-                    total_fields += len(fields)
-                    crawl_ok += 1
+                    _scr = crawler.session.get(
+                        _ep['url'], params=_ep['params'], timeout=20)
+                    _scr.raise_for_status()
+                    _scdata = _scr.json()
+                    _scfields = _flatten_json(_scdata)
+                    db.save_schema_fields(
+                        _ep['sport_key'], _ep['endpoint_type'],
+                        _ep['url'], _scfields)
+                    _total_fields += len(_scfields)
+                    _crawl_ok += 1
                 except Exception:
-                    crawl_fail += 1
+                    _crawl_fail += 1
                 time.sleep(0.35)
-            prog.empty()
-            status_ph.empty()
+            _sc_prog.empty()
+            _sc_ph.empty()
             st.success(
-                f"✅ {crawl_ok} endpoints crawled · {crawl_fail} errors · "
-                f"{total_fields:,} fields discovered"
+                f"✅ {_crawl_ok} endpoints crawled · "
+                f"{_crawl_fail} errors · "
+                f"{_total_fields:,} fields discovered"
             )
 
-        # ── Coverage dashboard ──
-        df_summary = db.get_schema_summary()
-        if not df_summary.empty:
+        # ── Coverage dashboard ─────────────────────────────────────
+        _df_summary = db.get_schema_summary()
+        if not _df_summary.empty:
             st.markdown("#### Coverage Dashboard")
-            display_summary = df_summary.copy()
-            display_summary['last_crawled'] = display_summary['last_crawled'].str[:16]
+            _ds_display = _df_summary.copy()
+            _ds_display['last_crawled'] = _ds_display['last_crawled'].str[:16]
             st.dataframe(
-                display_summary.rename(columns={
+                _ds_display.rename(columns={
                     'sport_key': 'Sport', 'endpoint_type': 'Endpoint',
                     'total_fields': 'Fields Discovered', 'last_crawled': 'Last Crawled',
                 }),
                 use_container_width=True, hide_index=True,
             )
 
+            # ── Field Explorer ─────────────────────────────────────
             st.markdown("#### Field Explorer")
-            fe1, fe2, fe3 = st.columns([2, 2, 2])
-            with fe1:
-                sport_opts = ['(all)'] + sorted(df_summary['sport_key'].unique().tolist())
-                sel_sk = st.selectbox("Sport", sport_opts, key='fe_sport')
-            with fe2:
-                ep_opts = ['(all)'] + sorted(df_summary['endpoint_type'].unique().tolist())
-                sel_et = st.selectbox("Endpoint", ep_opts, key='fe_ep')
-            with fe3:
-                field_search = st.text_input(
+            st.caption(
+                "Search for any ESPN field by name. "
+                "Use this to discover data ESPN exposes but we don't yet parse."
+            )
+            _fe1, _fe2, _fe3 = st.columns([2, 2, 2])
+            with _fe1:
+                _fe_sport_opts = ['(all)'] + sorted(
+                    _df_summary['sport_key'].unique().tolist())
+                _fe_sel_sk = st.selectbox("Sport", _fe_sport_opts, key='fe_sport')
+            with _fe2:
+                _fe_ep_opts = ['(all)'] + sorted(
+                    _df_summary['endpoint_type'].unique().tolist())
+                _fe_sel_et = st.selectbox("Endpoint", _fe_ep_opts, key='fe_ep')
+            with _fe3:
+                _fe_search = st.text_input(
                     "Search JSON path",
                     placeholder="e.g. odds, weather, venue, capacity…",
                     key='fe_search'
                 )
 
-            df_fields = db.get_schema_df(
-                sport_key=None if sel_sk == '(all)' else sel_sk,
-                endpoint_type=None if sel_et == '(all)' else sel_et,
+            _df_fields = db.get_schema_df(
+                sport_key=None if _fe_sel_sk == '(all)' else _fe_sel_sk,
+                endpoint_type=None if _fe_sel_et == '(all)' else _fe_sel_et,
             )
-            if field_search:
-                df_fields = df_fields[
-                    df_fields['field_path'].str.contains(field_search, case=False, na=False)
+            if _fe_search:
+                _df_fields = _df_fields[
+                    _df_fields['field_path'].str.contains(
+                        _fe_search, case=False, na=False)
                 ]
 
-            show_cols = ['sport_key', 'endpoint_type', 'field_path', 'value_type', 'example_value']
-            col_rename = {
+            _fe_show_cols = [
+                'sport_key', 'endpoint_type', 'field_path',
+                'value_type', 'example_value']
+            _fe_col_rename = {
                 'sport_key': 'Sport', 'endpoint_type': 'Endpoint',
                 'field_path': 'JSON Path', 'value_type': 'Type',
                 'example_value': 'Example Value',
             }
 
-            if not df_fields.empty:
-                st.caption(f"{len(df_fields):,} fields")
+            if not _df_fields.empty:
+                st.caption(f"{len(_df_fields):,} fields match")
                 st.dataframe(
-                    df_fields[show_cols].rename(columns=col_rename),
-                    use_container_width=True, hide_index=True, height=460,
+                    _df_fields[_fe_show_cols].rename(columns=_fe_col_rename),
+                    use_container_width=True, hide_index=True, height=420,
                 )
 
-                # Highlight high-value fields we're now using or could use
-                HIGH_VALUE_KW = [
+                _HIGH_VALUE_KW = [
                     'odds', 'weather', 'neutral', 'conference', 'ticket', 'capacity',
                     'playoff', 'seed', 'premium', 'story', 'keyword', 'franchise',
                     'injury', 'returnDate', 'lastFiveGames', 'geoBroadcast',
                     'pickcenter', 'standingSummary', 'nextEvent',
                 ]
-                mask_hv = df_fields['field_path'].str.lower().str.contains(
-                    '|'.join(HIGH_VALUE_KW), na=False
-                )
-                if mask_hv.any():
+                _mask_hv = _df_fields['field_path'].str.lower().str.contains(
+                    '|'.join(_HIGH_VALUE_KW), na=False)
+                if _mask_hv.any():
                     with st.expander(
-                        f"⭐ High-value fields ({mask_hv.sum()} found — click to expand)"
+                        f"⭐ High-value / parser-worthy fields "
+                        f"({_mask_hv.sum()} found)"
                     ):
                         st.caption(
-                            "Fields containing: " +
-                            ', '.join(f'`{k}`' for k in HIGH_VALUE_KW)
+                            "Fields matching: " +
+                            ', '.join(f'`{k}`' for k in _HIGH_VALUE_KW)
                         )
                         st.dataframe(
-                            df_fields[mask_hv][show_cols].rename(columns=col_rename),
+                            _df_fields[_mask_hv][_fe_show_cols].rename(
+                                columns=_fe_col_rename),
                             use_container_width=True, hide_index=True,
                         )
             else:
-                st.info("No fields match your filter.")
+                st.info("No fields match your filter — try a shorter search term.")
         else:
-            st.info("No schema data yet. Click **🕷 Crawl Endpoints** above to start discovery.")
-            with st.expander("What does the Schema Crawler do?"):
-                st.markdown("""
-                The **Schema Crawler** fetches every ESPN endpoint once and walks the full JSON
-                response recursively, recording every field path, data type, and example value.
+            st.info(
+                "No schema data yet. Click **🕷 Crawl Endpoints** above "
+                "to start field discovery."
+            )
 
-                **Why this matters:**  ESPN returns *far more data* than our parsers currently use.
-                For example:
-                - Scoreboard now extracts **betting odds** (spread, O/U, moneyline) → shown in game cards
-                - Scoreboard now extracts **weather** for outdoor games → shown in game cards
-                - Scoreboard now flags **neutral site** and **conference** games → badges in cards
-                - News articles contain the full **story text** and **keywords**
-                - Summary contains **last 5 game results** per team and full **injury reports**
-
-                After crawling, use the **Field Explorer** above to browse all available fields
-                and find data worth adding to each page.
-                """)
-
-        # ── Custom View Builder ────────────────────────────
+        # ════════════════════════════════════════════════════════════
+        # SECTION 2 — Custom View Builder
+        # ════════════════════════════════════════════════════════════
         st.divider()
         st.markdown("### 📋 Custom View Builder")
         st.caption(
-            "Column choices are pulled directly from the actual stored data — "
-            "only real fields are shown. Live preview updates as you configure."
+            "Build any chart or table directly from **your stored data** — "
+            "no ESPN calls needed. Column pickers always reflect real DB columns. "
+            "Data sources: game history, standings, rankings, teams, roster, "
+            "player stats, play-by-play, news, and more."
         )
 
         _cv_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'custom_views')
-        _cv_pub = os.path.join(_cv_dir, 'public')
         os.makedirs(_cv_dir, exist_ok=True)
-        os.makedirs(_cv_pub, exist_ok=True)
 
         if 'cv_session_views' not in st.session_state:
             st.session_state['cv_session_views'] = []
 
+        # ── Sub-section: DB snapshot — what data do we actually have? ──
+        with st.expander("📦 What's in your local database?", expanded=False):
+            st.caption(
+                "Row counts per table per league. "
+                "Sources with 0 rows need their respective tabs to be populated first."
+            )
+            _snap_sport = st.selectbox(
+                "League to inspect",
+                EndpointRegistry.get_all_keys(),
+                key='cvb_snap_sport',
+            )
+            _snap_rows = []
+            for _src_key, (_src_label, _src_desc) in _CVB_SOURCES.items():
+                _cnt = _cvb_row_count(_snap_sport, _src_key)
+                _status = "✅" if _cnt > 0 else "⬜"
+                _snap_rows.append({
+                    'Status':      _status,
+                    'Data Source': _src_label,
+                    'Rows':        _cnt,
+                    'Description': _src_desc,
+                    'How to populate': (
+                        'Sync Scoreboard tab' if _src_key in ('game_history', 'scoreboard')
+                        else 'Sync Scoreboard' if _src_key in ('standings', 'rankings', 'news')
+                        else 'Teams tab → Load Teams' if _src_key == 'teams'
+                        else 'Teams tab → Load Teams → Load Detail' if _src_key == 'team_detail'
+                        else 'Player Trends → Load Roster' if _src_key == 'roster'
+                        else 'Scoreboard → Fetch Summary → Sync Player Stats' if _src_key == 'player_stats'
+                        else 'Scoreboard → Fetch Summary (PBP is saved automatically)' if _src_key == 'play_by_play'
+                        else 'Player Trends → Build Profile' if _src_key == 'player_profiles'
+                        else '—'
+                    ),
+                })
+            st.dataframe(
+                pd.DataFrame(_snap_rows),
+                use_container_width=True, hide_index=True,
+            )
+
+        # ── Main builder expander ──────────────────────────────────
         with st.expander("➕ Create a New Custom View", expanded=False):
-            # ── Row 1: name / sport / source ─────────────────
-            _cvbr1, _cvbr2, _cvbr3 = st.columns([3, 2, 2])
-            with _cvbr1:
+            _cvb_r1, _cvb_r2, _cvb_r3 = st.columns([3, 2, 3])
+
+            with _cvb_r1:
                 _cv_name = st.text_input(
-                    "View Name *", placeholder="e.g. NFL Win Totals",
-                    key='cvb_name')
+                    "View Name *",
+                    placeholder="e.g. NFL Rushing Leaders",
+                    key='cvb_name',
+                )
                 _cv_desc = st.text_input(
                     "Description (optional)",
-                    placeholder="Short summary shown in the Views tab",
-                    key='cvb_desc')
-            with _cvbr2:
+                    placeholder="Short summary shown in the Custom Views tab",
+                    key='cvb_desc',
+                )
+
+            with _cvb_r2:
                 _cv_sport = st.selectbox(
                     "Sport / League",
                     EndpointRegistry.get_all_keys(),
-                    key='cvb_sport')
-            with _cvbr3:
-                _cv_data_src = st.selectbox(
-                    "Data Source",
-                    ['scoreboard', 'standings', 'rankings', 'teams'],
-                    key='cvb_src',
-                    help="Which stored data to display",
+                    key='cvb_sport',
                 )
 
-            # ── Load real DF from DB ─────────────────────────
-            _cvb_df = _cvb_load_df(_cv_sport, _cv_data_src)
+            with _cvb_r3:
+                # Show data source with row counts so user knows what has data
+                _available_src_labels = {}
+                for _sk, (_sl, _sd) in _CVB_SOURCES.items():
+                    _rc = _cvb_row_count(_cv_sport, _sk)
+                    _available_src_labels[_sk] = (
+                        f"{_sl}  ({_rc:,} rows)"
+                        if _rc > 0
+                        else f"{_sl}  (0 rows — needs data)"
+                    )
+                _cv_data_src = st.selectbox(
+                    "Data Source",
+                    list(_CVB_SOURCES.keys()),
+                    format_func=lambda k: _available_src_labels.get(k, k),
+                    key='cvb_src',
+                    help=(
+                        "Pick any DB table. Row counts are shown. "
+                        "Sources with 0 rows need the relevant tab populated first — "
+                        "expand 'What's in your local database?' above for instructions."
+                    ),
+                )
+
+            # ── Live load from DB ─────────────────────────────────
+            _cvb_df      = _cvb_load_df(_cv_sport, _cv_data_src)
             _cvb_cols    = list(_cvb_df.columns) if not _cvb_df.empty else []
             _cvb_numcols = (
-                [c for c in _cvb_cols
-                 if pd.api.types.is_numeric_dtype(_cvb_df[c])]
+                [c for c in _cvb_cols if pd.api.types.is_numeric_dtype(_cvb_df[c])]
                 if not _cvb_df.empty else []
             )
             _cvb_ok = bool(_cvb_cols)
 
             if not _cvb_ok:
+                _src_how = (
+                    'Sync Scoreboard tab' if _cv_data_src in ('game_history', 'scoreboard')
+                    else 'sync the Scoreboard tab' if _cv_data_src in ('standings', 'rankings', 'news')
+                    else 'go to Teams tab → Load Teams' if _cv_data_src == 'teams'
+                    else 'Teams tab → Load Teams → Load Detail' if _cv_data_src == 'team_detail'
+                    else 'go to Player Trends → Load Roster' if _cv_data_src == 'roster'
+                    else 'fetch game summaries then click Sync Player Stats on Player Trends' if _cv_data_src == 'player_stats'
+                    else 'fetch game summaries via Scoreboard → Fetch Summary' if _cv_data_src == 'play_by_play'
+                    else 'go to Player Trends → Build Profile' if _cv_data_src == 'player_profiles'
+                    else 'populate the relevant tab first'
+                )
                 st.warning(
-                    f"⚠️ No **{_cv_data_src}** data cached for **{_cv_sport}** yet.  "
-                    "Sync this league first — column pickers will populate once data is available."
+                    f"⚠️ **{_CVB_SOURCES[_cv_data_src][0]}** has no data for "
+                    f"**{_cv_sport}** yet. "
+                    f"To populate it: *{_src_how}*."
                 )
 
-            # ── Display type ──────────────────────────────────
+            # ── Display type ──────────────────────────────────────
             _cv_chart = st.selectbox(
                 "Display As",
                 ['table', 'bar_chart', 'line_chart', 'scatter', 'metric_cards'],
                 key='cvb_chart',
+                help=(
+                    "table = full sortable dataframe  |  bar/line/scatter = Plotly chart  "
+                    "|  metric_cards = up to 5 large KPI tiles"
+                ),
             )
             _need_axes = _cv_chart in ('bar_chart', 'line_chart', 'scatter', 'metric_cards')
 
-            # ── Column pickers ────────────────────────────────
-            _cvbc1, _cvbc2, _cvbc3 = st.columns(3)
-            with _cvbc1:
+            # ── Column pickers ────────────────────────────────────
+            _cvc1, _cvc2, _cvc3 = st.columns(3)
+
+            with _cvc1:
                 if _need_axes:
-                    if _cvb_ok:
-                        _cv_chart_x = st.selectbox(
-                            "X axis / Label column",
-                            _cvb_cols, key='cvb_cx',
-                        )
-                    else:
-                        _cv_chart_x = st.text_input(
-                            "X axis column", key='cvb_cx',
-                            placeholder="Sync data to see options",
-                        )
+                    _cv_chart_x = st.selectbox(
+                        "X axis / Label column",
+                        _cvb_cols if _cvb_ok else ['(no data yet)'],
+                        key='cvb_cx',
+                        disabled=not _cvb_ok,
+                        help="The column used as the category axis or label.",
+                    )
+                    if not _cvb_ok:
+                        _cv_chart_x = ''
                 else:
                     _cv_chart_x = ''
-                    st.caption("*X/Y not needed for table*")
-            with _cvbc2:
-                if _need_axes and _cv_chart != 'metric_cards':
-                    if _cvb_ok:
-                        _cv_chart_y = st.selectbox(
-                            "Y axis (numeric)",
-                            _cvb_numcols if _cvb_numcols else _cvb_cols,
-                            key='cvb_cy',
-                        )
-                    else:
-                        _cv_chart_y = st.text_input(
-                            "Y axis column", key='cvb_cy',
-                            placeholder="Sync data to see options",
-                        )
-                elif _cv_chart == 'metric_cards':
-                    if _cvb_ok:
-                        _cv_chart_y = st.selectbox(
-                            "Value column",
-                            _cvb_numcols if _cvb_numcols else _cvb_cols,
-                            key='cvb_cy',
-                        )
-                    else:
-                        _cv_chart_y = st.text_input(
-                            "Value column", key='cvb_cy',
-                            placeholder="Sync data to see options",
-                        )
+                    st.caption("*X / Y not needed for table view*")
+
+            with _cvc2:
+                if _need_axes:
+                    _yopts = _cvb_numcols if _cvb_numcols else _cvb_cols
+                    _cv_chart_y = st.selectbox(
+                        "Y axis / Value column",
+                        _yopts if _cvb_ok else ['(no data yet)'],
+                        key='cvb_cy',
+                        disabled=not _cvb_ok,
+                        help=(
+                            "Numeric column for the chart value axis. "
+                            "If no numeric columns exist, any column can be selected."
+                        ),
+                    )
+                    if not _cvb_ok:
+                        _cv_chart_y = ''
                 else:
                     _cv_chart_y = ''
                     st.empty()
-            with _cvbc3:
-                if _cvb_ok:
-                    _cv_filter_col_raw = st.selectbox(
-                        "Filter column (optional)",
-                        ['(none)'] + _cvb_cols, key='cvb_fcol',
-                    )
-                    _cv_filter_col = (
-                        '' if _cv_filter_col_raw == '(none)'
-                        else _cv_filter_col_raw
-                    )
-                else:
-                    _cv_filter_col_raw = st.text_input(
-                        "Filter column", key='cvb_fcol',
-                        placeholder="Sync data to see options",
-                    )
-                    _cv_filter_col = _cv_filter_col_raw
 
-            # Filter value — suggest real values from the column
+            with _cvc3:
+                _cv_fcol_raw = st.selectbox(
+                    "Filter column (optional)",
+                    ['(none)'] + (_cvb_cols if _cvb_ok else []),
+                    key='cvb_fcol',
+                    help=(
+                        "Optionally narrow the data by the value of this column. "
+                        "Filter value picker appears below once you choose a column."
+                    ),
+                )
+                _cv_filter_col = '' if _cv_fcol_raw == '(none)' else _cv_fcol_raw
+
+            # Filter value — always populated from real DB values
             _cv_filter_val = ''
             if _cv_filter_col and _cvb_ok and _cv_filter_col in _cvb_df.columns:
                 _fv_uniq = sorted(
-                    _cvb_df[_cv_filter_col].dropna().astype(str).unique().tolist()[:60]
+                    _cvb_df[_cv_filter_col].dropna().astype(str).unique().tolist()[:80]
                 )
-                _cv_filter_val = st.selectbox(
-                    f"Filter value for `{_cv_filter_col}`",
-                    ['(all)'] + _fv_uniq, key='cvb_fval',
-                )
-                if _cv_filter_val == '(all)':
-                    _cv_filter_val = ''
+                if _fv_uniq:
+                    _cv_fval_sel = st.selectbox(
+                        f"Filter value for `{_cv_filter_col}`",
+                        ['(all)'] + _fv_uniq,
+                        key='cvb_fval',
+                        help=(
+                            "Only rows matching this value will be shown in the view. "
+                            "Choose (all) to show everything."
+                        ),
+                    )
+                    _cv_filter_val = '' if _cv_fval_sel == '(all)' else _cv_fval_sel
+                else:
+                    st.caption(f"No values found in `{_cv_filter_col}`.")
             elif _cv_filter_col:
                 _cv_filter_val = st.text_input(
-                    "Filter value", key='cvb_fval')
+                    "Filter value", key='cvb_fval',
+                    help="Type a value to filter on — partial match supported.",
+                )
 
-            # ── Live Preview ──────────────────────────────────
+            # ── Live Preview ──────────────────────────────────────
             st.markdown("---")
             st.markdown("##### 🔍 Live Preview")
             if _cvb_ok:
+                st.caption(
+                    f"Showing **{_CVB_SOURCES[_cv_data_src][0]}** "
+                    f"for **{_cv_sport}** "
+                    f"({len(_cvb_df):,} rows in DB)"
+                )
                 _cvb_now_cfg = dict(
-                    name=(_cv_name or '(untitled)'),
-                    description=(_cv_desc or ''),
+                    name=_cv_name or '(untitled)',
+                    description=_cv_desc or '',
                     sport_key=_cv_sport,
                     data_source=_cv_data_src,
                     chart_type=_cv_chart,
-                    chart_x=(_cv_chart_x if isinstance(_cv_chart_x, str) else ''),
-                    chart_y=(_cv_chart_y if isinstance(_cv_chart_y, str) else ''),
+                    chart_x=_cv_chart_x if isinstance(_cv_chart_x, str) else '',
+                    chart_y=_cv_chart_y if isinstance(_cv_chart_y, str) else '',
                     filter_col=_cv_filter_col,
-                    filter_val=_cv_filter_val,
+                    filter_val=_cv_filter_val if isinstance(_cv_filter_val, str) else '',
                 )
                 _cv_run_view(_cvb_now_cfg)
             else:
-                st.info("Sync data for this league to see a live preview.")
+                st.info(
+                    "⬜ No preview available — the selected data source has no rows yet. "
+                    "See the warning above for how to populate it."
+                )
 
-            # ── Save buttons ──────────────────────────────────
+            # ── Save ──────────────────────────────────────────────
             st.markdown("---")
-            _cvsave_ses, _cvsave_disk = st.columns(2)
+            _cvs_col1, _cvs_col2 = st.columns(2)
 
             def _cvb_build_cfg():
                 return dict(
@@ -7668,36 +7998,42 @@ def main():
                     sport_key=_cv_sport,
                     data_source=_cv_data_src,
                     chart_type=_cv_chart,
-                    chart_x=(_cv_chart_x if isinstance(_cv_chart_x, str) else ''),
-                    chart_y=(_cv_chart_y if isinstance(_cv_chart_y, str) else ''),
+                    chart_x=_cv_chart_x if isinstance(_cv_chart_x, str) else '',
+                    chart_y=_cv_chart_y if isinstance(_cv_chart_y, str) else '',
                     filter_col=_cv_filter_col,
                     filter_val=_cv_filter_val if isinstance(_cv_filter_val, str) else '',
                 )
 
-            with _cvsave_ses:
-                if st.button("💾 Add to Session", key='cvb_ses'):
+            with _cvs_col1:
+                if st.button("💾 Add to Session", key='cvb_ses',
+                             help="Store this view for the current session only — lost on page reload."):
                     if not _cv_name.strip():
                         st.error("View Name is required.")
                     else:
                         st.session_state['cv_session_views'].append(_cvb_build_cfg())
-                        st.success(f"✅ \"{_cv_name}\" added to your session.")
+                        st.success(f"✅ \"{_cv_name}\" added to session.")
                         st.rerun()
-            with _cvsave_disk:
-                if st.button("📁 Save to Disk", key='cvb_disk'):
+
+            with _cvs_col2:
+                if st.button("📁 Save to Disk", key='cvb_disk',
+                             help="Write a JSON config file — view persists across restarts and appears on the Custom Views tab."):
                     if not _cv_name.strip():
                         st.error("View Name is required.")
                     else:
                         _new_cv = _cvb_build_cfg()
-                        _safe = "".join(
+                        _safe_name = "".join(
                             c if c.isalnum() or c in '._- ' else '_'
                             for c in _new_cv['name']
                         ).replace(' ', '_')[:60]
-                        _cv_path = os.path.join(_cv_dir, f"{_safe}.json")
-                        with open(_cv_path, 'w', encoding='utf-8') as _f:
-                            json.dump(_new_cv, _f, indent=2)
+                        _cv_path = os.path.join(_cv_dir, f"{_safe_name}.json")
+                        with open(_cv_path, 'w', encoding='utf-8') as _cvf:
+                            json.dump(_new_cv, _cvf, indent=2)
                         if _new_cv not in st.session_state['cv_session_views']:
                             st.session_state['cv_session_views'].append(_new_cv)
-                        st.success(f"✅ Saved to `{_cv_path}`")
+                        st.success(
+                            f"✅ Saved to `{_cv_path}`. "
+                            "It will appear on the **📋 Custom Views** tab."
+                        )
                         st.rerun()
 
     # ── TAB 9: RAW INSPECTOR ───────────────────────────────
