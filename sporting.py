@@ -9784,12 +9784,13 @@ def main():
     with tab12:
         _lp_theme = _get_sport_theme(st.session_state.get('active_sport', ''))
         st.markdown(
-            f"<div style='background:linear-gradient(135deg,"
-            f"{_lp_theme['primary']},{_lp_theme['secondary']});"
-            f"border-radius:12px;padding:20px 28px 14px;"
-            f"margin-bottom:18px;color:#fff;'>"
-            f"<h2 style='margin:0 0 6px;font-size:1.55rem;'>🎯 Lines &amp; Props</h2>"
-            f"<p style='margin:0;opacity:.85;font-size:.9rem;'>"
+            f"<div style='background:{_lp_theme['gradient']};"
+            f"border-left:5px solid {_lp_theme['accent']};"
+            f"border-radius:0 12px 12px 0;padding:20px 28px 14px;"
+            f"margin-bottom:18px;'>"
+            f"<h2 style='margin:0 0 6px;font-size:1.55rem;"
+            f"color:{_lp_theme['color']};'>🎯 Lines &amp; Props</h2>"
+            f"<p style='margin:0;color:{_lp_theme['color']}bb;font-size:.9rem;'>"
             f"Live game odds · player props · multi-source comparison<br>"
             f"<b>Sources:</b> ESPN Pickcenter · DraftKings · PrizePicks · "
             f"OddsHarvester (OddsPortal 40+ books)"
