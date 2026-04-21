@@ -6977,6 +6977,7 @@ def main():
                                     }
 
                                     def _render_roster_group(gdf_in):
+                                        import pandas as pd
                                         gdf_in = gdf_in.copy()
                                         gdf_in['_j'] = pd.to_numeric(
                                             gdf_in['jersey'], errors='coerce').fillna(999)
