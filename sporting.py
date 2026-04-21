@@ -4456,10 +4456,11 @@ def _render_donation_page():
             <td style="padding:10px 14px;color:#333">LLM-generated plain-English recap for every game using stored PBP + box score</td>
             <td style="padding:10px 14px;text-align:right;font-weight:700;color:#0c4a6e">~$50</td>
           </tr>
-          <tr style="background:#fdf4ff">
-            <td style="padding:10px 14px;font-weight:700;color:#581c87">📱 Mobile-first layout</td>
-            <td style="padding:10px 14px;color:#333">Responsive card-based UI that works well on phones and tablets</td>
-            <td style="padding:10px 14px;text-align:right;font-weight:700;color:#581c87">~$80</td>
+          <tr style="background:#f0fdf4">
+            <td style="padding:10px 14px;font-weight:700;color:#166534">✅ 📱 Mobile-first layout</td>
+            <td style="padding:10px 14px;color:#333">Responsive card-based UI that works well on phones and tablets &mdash;
+              <strong style="color:#059669">funded &amp; shipped April 2026!</strong></td>
+            <td style="padding:10px 14px;text-align:right;font-weight:700;color:#059669">DONE ✨</td>
           </tr>
           <tr style="background:#fff8f0">
             <td style="padding:10px 14px;font-weight:700;color:#92400e">📈 Betting edge tracker</td>
