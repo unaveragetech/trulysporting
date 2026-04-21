@@ -4182,9 +4182,43 @@ def _render_landing():
     </div>
     """)
 
-    _, cta_col, _ = st.columns([1, 2, 1])
-    with cta_col:
-        if st.button("🚀  Start Exploring", type="primary", use_container_width=True):
+    st.html("""
+    <div style="text-align:center;padding:8px 0 4px">
+      <p style="font-size:1rem;font-weight:700;color:#333;margin:0 0 4px">Choose your experience</p>
+      <p style="font-size:0.78rem;color:#888;margin:0">You can switch at any time from inside the app</p>
+    </div>
+    """)
+
+    _mode_l, _mode_r = st.columns(2)
+    with _mode_l:
+        st.html("""
+        <div style="border:2px solid #1e3a6e;border-radius:16px;padding:20px 16px 14px;
+                    background:#f0f4ff;text-align:center;margin-bottom:4px">
+          <div style="font-size:38px;margin-bottom:6px">🖥️</div>
+          <div style="font-size:16px;font-weight:800;color:#1e3a6e;margin-bottom:6px">Desktop</div>
+          <div style="font-size:12px;color:#555;line-height:1.5">
+            Full-width layout · sidebar navigation · dense data tables · all charts
+          </div>
+        </div>
+        """)
+        if st.button("Launch Desktop Mode", type="primary", use_container_width=True, key='land_desktop'):
+            st.session_state['ui_mode'] = 'desktop'
+            st.session_state['app_started'] = True
+            st.session_state['tos_accepted'] = False
+            st.rerun()
+    with _mode_r:
+        st.html("""
+        <div style="border:2px solid #b84a12;border-radius:16px;padding:20px 16px 14px;
+                    background:#fff7f0;text-align:center;margin-bottom:4px">
+          <div style="font-size:38px;margin-bottom:6px">📱</div>
+          <div style="font-size:16px;font-weight:800;color:#b84a12;margin-bottom:6px">Mobile</div>
+          <div style="font-size:12px;color:#555;line-height:1.5">
+            Single-column · large tap targets · compact cards · readable on small screens
+          </div>
+        </div>
+        """)
+        if st.button("Launch Mobile Mode", use_container_width=True, key='land_mobile'):
+            st.session_state['ui_mode'] = 'mobile'
             st.session_state['app_started'] = True
             st.session_state['tos_accepted'] = False
             st.rerun()
@@ -4749,6 +4783,89 @@ def main():
     </style>
     """)
 
+    # ── MOBILE MODE CSS OVERRIDES ─────────────────────────────
+    if st.session_state.get('ui_mode', 'desktop') == 'mobile':
+        st.html("""
+        <style>
+        /* ── Mobile: wider content, no wasted side margin ── */
+        .block-container {
+            padding-top: 0.5rem !important;
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
+            max-width: 100% !important;
+        }
+
+        /* ── Mobile: collapse sidebar by default ── */
+        section[data-testid="stSidebar"] {
+            min-width: 0 !important;
+            width: 0 !important;
+            transform: translateX(-100%) !important;
+        }
+        [data-testid="stSidebarCollapseButton"] { display: flex !important; }
+
+        /* ── Mobile: larger readable font ── */
+        html, body, [class*="css"] { font-size: 16px !important; }
+        .stMarkdown p, .stMarkdown li { font-size: 15px !important; line-height: 1.7 !important; }
+        [data-testid="stCaptionContainer"] p { font-size: 13px !important; }
+
+        /* ── Mobile: larger tab labels for tap targets ── */
+        .stTabs [data-baseweb="tab"] {
+            font-size: 15px !important;
+            padding: 10px 12px !important;
+            min-height: 44px !important;
+        }
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 2px !important;
+            padding: 4px 4px !important;
+            flex-wrap: wrap !important;
+        }
+
+        /* ── Mobile: larger buttons ── */
+        .stButton > button {
+            min-height: 48px !important;
+            font-size: 15px !important;
+            padding: 10px 18px !important;
+        }
+
+        /* ── Mobile: bigger metric values ── */
+        [data-testid="stMetricValue"] { font-size: 22px !important; }
+        [data-testid="stMetric"] { padding: 12px 10px !important; }
+
+        /* ── Mobile: inputs taller for easy tap ── */
+        [data-testid="stTextInput"] input,
+        [data-testid="stNumberInput"] input {
+            min-height: 44px !important;
+            font-size: 16px !important;
+        }
+        [data-baseweb="select"] > div {
+            min-height: 44px !important;
+            font-size: 15px !important;
+        }
+
+        /* ── Mobile: dataframe font legible ── */
+        [data-testid="stDataFrame"] * { font-size: 13px !important; }
+
+        /* ── Mobile: columns stack to single column ── */
+        [data-testid="stHorizontalBlock"] {
+            flex-direction: column !important;
+        }
+        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+            width: 100% !important;
+            flex: 1 1 100% !important;
+            min-width: 0 !important;
+        }
+
+        /* ── Mobile: expanders — larger header ── */
+        [data-testid="stExpander"] summary {
+            min-height: 48px !important;
+            font-size: 15px !important;
+        }
+
+        /* ── Mobile: selectbox label ── */
+        label[data-testid="stWidgetLabel"] p { font-size: 14px !important; }
+        </style>
+        """)
+
     # ── ADSENSE METHOD 2 — body-level sticky banner ──────────
     # Rendered on EVERY page state (landing, ToS, main app).
     # Includes: <meta name="google-adsense-account">, Auto Ads
@@ -4844,20 +4961,26 @@ def main():
     _t_hdr  = _get_sport_theme(_ep_hdr)
     _nl     = len(_active_eps_hdr)
     _ltxt   = str(_nl) + (' leagues' if _nl != 1 else ' league') + ' active'
-    st.html(
-        '<div style="display:flex;align-items:center;justify-content:space-between;'
-        'padding:8px 4px 14px;border-bottom:2px solid #e8edf5;margin-bottom:16px">'
-        '<div style="display:flex;align-items:center;gap:10px">'
-        '<span style="font-size:26px">' + _t_hdr['emoji'] + '</span>'
-        '<div>'
-        '<div style="font-size:21px;font-weight:800;color:#1a1a2e;letter-spacing:-0.3px">'
-        'TrulySporting Analytics</div>'
-        '<div style="font-size:11px;color:#888">Live ESPN data · ' + _ltxt + ' · Information Triage</div>'
-        '</div></div>'
-        '<div style="font-size:11px;color:#bbb;text-align:right;line-height:1.7">'
-        '🏆 Sports intelligence<br>ESPN API · SQLite-cached</div>'
-        '</div>'
-    )
+    _ui_mode_now = st.session_state.get('ui_mode', 'desktop')
+    _hdr_left, _hdr_right = st.columns([5, 1])
+    with _hdr_left:
+        st.html(
+            '<div style="display:flex;align-items:center;gap:10px;'
+            'padding:8px 4px 14px;border-bottom:2px solid #e8edf5;margin-bottom:4px">'
+            '<span style="font-size:26px">' + _t_hdr['emoji'] + '</span>'
+            '<div>'
+            '<div style="font-size:21px;font-weight:800;color:#1a1a2e;letter-spacing:-0.3px">'
+            'TrulySporting Analytics</div>'
+            '<div style="font-size:11px;color:#888">Live ESPN data · ' + _ltxt + ' · Information Triage</div>'
+            '</div></div>'
+        )
+    with _hdr_right:
+        st.write('')
+        _mode_label = '📱 Mobile' if _ui_mode_now == 'desktop' else '🖥️ Desktop'
+        _mode_tip   = 'Switch to Mobile layout' if _ui_mode_now == 'desktop' else 'Switch to Desktop layout'
+        if st.button(_mode_label, key='hdr_mode_toggle', help=_mode_tip, use_container_width=True):
+            st.session_state['ui_mode'] = 'mobile' if _ui_mode_now == 'desktop' else 'desktop'
+            st.rerun()
 
 
     # ── SIDEBAR ───────────────────────────────────────────────
