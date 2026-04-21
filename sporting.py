@@ -4339,6 +4339,123 @@ def _render_donation_page():
     </div>
     """)
 
+    # ── First milestone + funding progress bar ──────────────────────────
+    st.html("""
+    <div style="max-width:780px;margin:24px auto 0;padding:0 8px">
+
+      <!-- Milestone banner -->
+      <div style="background:linear-gradient(135deg,#064e3b 0%,#065f46 60%,#047857 100%);
+                  border-radius:16px;padding:22px 28px 18px;margin-bottom:22px;
+                  box-shadow:0 4px 18px rgba(0,0,0,0.18);text-align:center">
+        <div style="font-size:40px;margin-bottom:6px">🎉</div>
+        <div style="font-size:1.3rem;font-weight:900;color:#fff;margin-bottom:6px;letter-spacing:-0.3px">
+          First Milestone Reached!
+        </div>
+        <div style="font-size:0.92rem;color:rgba(255,255,255,0.85);line-height:1.7;max-width:520px;margin:0 auto 10px">
+          Thanks to <strong style="color:#6ee7b7">$65 USD in donations</strong>, the community&#8217;s first milestone
+          unlocked the <strong style="color:#6ee7b7">&#128241; Mobile UI</strong> &mdash; a full responsive redesign so
+          TrulySporting works great on phones and tablets, not just desktop.
+        </div>
+        <div style="display:inline-block;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);
+                    border-radius:50px;padding:6px 20px;font-size:12px;color:#a7f3d0;font-weight:700;letter-spacing:0.4px">
+          &#10003; SHIPPED &middot; April 2026
+        </div>
+      </div>
+
+      <!-- Funding progress bar -->
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:22px 24px 24px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px">
+          <div style="font-size:1rem;font-weight:800;color:#1a1a2e">&#128176; Community Funding</div>
+          <div style="font-size:0.85rem;color:#555">
+            <strong style="font-size:1.05rem;color:#059669">$65</strong>
+            <span style="color:#94a3b8"> raised &nbsp;&middot;&nbsp; goal </span>
+            <strong>$1,000+</strong>
+          </div>
+        </div>
+
+        <!-- Bar track -->
+        <div style="position:relative;height:18px;background:#f1f5f9;border-radius:50px;overflow:visible;margin-bottom:36px">
+          <!-- Fill: 65/1000 = 6.5% -->
+          <div style="position:absolute;left:0;top:0;height:100%;width:6.5%;
+                      background:linear-gradient(90deg,#059669,#10b981);
+                      border-radius:50px;box-shadow:0 2px 8px rgba(16,185,129,0.45)">
+          </div>
+          <!-- Glow dot at current position -->
+          <div style="position:absolute;top:50%;left:6.5%;transform:translate(-50%,-50%);
+                      width:22px;height:22px;border-radius:50%;
+                      background:#10b981;border:3px solid #fff;
+                      box-shadow:0 0 0 3px rgba(16,185,129,0.35)">
+          </div>
+
+          <!-- $0 -->
+          <div style="position:absolute;top:100%;left:0%;transform:translateX(-50%);margin-top:6px;text-align:center">
+            <div style="width:2px;height:8px;background:#cbd5e1;margin:0 auto 2px"></div>
+            <div style="font-size:10px;color:#94a3b8">$0</div>
+          </div>
+          <!-- $100 -->
+          <div style="position:absolute;top:100%;left:10%;transform:translateX(-50%);margin-top:6px;text-align:center">
+            <div style="width:2px;height:8px;background:#cbd5e1;margin:0 auto 2px"></div>
+            <div style="font-size:10px;color:#94a3b8">$100</div>
+          </div>
+          <!-- $250 -->
+          <div style="position:absolute;top:100%;left:25%;transform:translateX(-50%);margin-top:6px;text-align:center">
+            <div style="width:2px;height:8px;background:#cbd5e1;margin:0 auto 2px"></div>
+            <div style="font-size:10px;color:#94a3b8">$250</div>
+          </div>
+          <!-- $500 -->
+          <div style="position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:6px;text-align:center">
+            <div style="width:2px;height:8px;background:#cbd5e1;margin:0 auto 2px"></div>
+            <div style="font-size:10px;color:#94a3b8">$500</div>
+          </div>
+          <!-- $750 -->
+          <div style="position:absolute;top:100%;left:75%;transform:translateX(-50%);margin-top:6px;text-align:center">
+            <div style="width:2px;height:8px;background:#cbd5e1;margin:0 auto 2px"></div>
+            <div style="font-size:10px;color:#94a3b8">$750</div>
+          </div>
+          <!-- $1,000+ -->
+          <div style="position:absolute;top:100%;left:100%;transform:translateX(-50%);margin-top:6px;text-align:center">
+            <div style="width:2px;height:8px;background:#cbd5e1;margin:0 auto 2px"></div>
+            <div style="font-size:10px;color:#94a3b8;white-space:nowrap">$1,000+</div>
+          </div>
+        </div>
+
+        <!-- Milestone legend chips -->
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
+          <div style="display:flex;align-items:center;gap:6px;background:#f0fdf4;
+                      border:1px solid #bbf7d0;border-radius:8px;padding:6px 12px">
+            <span style="font-size:13px">&#10003;</span>
+            <span style="font-size:12px;font-weight:700;color:#166534">$65 &mdash; Mobile UI</span>
+            <span style="font-size:10px;background:#059669;color:#fff;border-radius:4px;padding:1px 6px;font-weight:700">SHIPPED</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;background:#f0f9ff;
+                      border:1px solid #bae6fd;border-radius:8px;padding:6px 12px">
+            <span style="font-size:13px">&#128276;</span>
+            <span style="font-size:12px;font-weight:700;color:#0c4a6e">$100 &mdash; Game alerts</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;background:#fdf4ff;
+                      border:1px solid #e9d5ff;border-radius:8px;padding:6px 12px">
+            <span style="font-size:13px">&#129302;</span>
+            <span style="font-size:12px;font-weight:700;color:#581c87">$250 &mdash; AI game summaries</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;background:#fff8f0;
+                      border:1px solid #fed7aa;border-radius:8px;padding:6px 12px">
+            <span style="font-size:13px">&#128202;</span>
+            <span style="font-size:12px;font-weight:700;color:#92400e">$500 &mdash; Fantasy points engine</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;background:#f8f0ff;
+                      border:1px solid #ddd6fe;border-radius:8px;padding:6px 12px">
+            <span style="font-size:13px">&#127760;</span>
+            <span style="font-size:12px;font-weight:700;color:#4c1d95">$1,000 &mdash; Multi-language + shared DB</span>
+          </div>
+        </div>
+
+        <p style="font-size:11px;color:#94a3b8;margin:12px 0 0;text-align:center">
+          Every dollar moves us forward. Funded features ship as free open-source updates to everyone.
+        </p>
+      </div>
+    </div>
+    """)
+
     # ── Origin story ─────────────────────────────────────────
     st.html("""
     <div style="max-width:780px;margin:28px auto;background:#fafafa;
