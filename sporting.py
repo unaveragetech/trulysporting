@@ -757,6 +757,15 @@ _PP_EP_MAP: Dict[str, str] = {
     'basketball/wnba':                      'WNBA',
 }
 
+# ── ESPN ep_key → OddsAssist league pages ─────────────────────────────
+_ODDSASSIST_LEAGUE_MAP: Dict[str, str] = {
+    'basketball/nba':                       'nba',
+    'football/nfl':                         'nfl',
+    'baseball/mlb':                         'mlb',
+    'hockey/nhl':                           'nhl',
+    'basketball/wnba':                      'wnba',
+}
+
 # ── ESPN ep_key → OddsHarvester (sport, league) CLI args ─────────────
 _OH_LEAGUE_MAP: Dict[str, Tuple[str, str]] = {
     'basketball/nba':                       ('basketball',        'nba'),
@@ -781,50 +790,74 @@ _LP_LEAGUE_LABELS: Dict[str, str] = {
 }
 
 
-def _fetch_prizepicks(pp_league: str) -> Tuple[pd.DataFrame, str]:
-    """Fetch PrizePicks projections for a league name (e.g. 'NBA'). Returns (df, error)."""
-    league_id = _PP_LEAGUE_MAP.get(pp_league)
-    if not league_id:
-        return pd.DataFrame(), f"No PrizePicks league ID mapped for '{pp_league}'"
+def _fetch_oddsassist_lines(ep_key: str) -> Tuple[pd.DataFrame, str]:
+    """Scrape OddsAssist league lines using Playwright. Returns (df, error)."""
+    page_slug = _ODDSASSIST_LEAGUE_MAP.get(ep_key)
+    if not page_slug:
+        return pd.DataFrame(), f"OddsAssist does not support league '{ep_key}' yet."
+
     try:
-        resp = requests.get(
-            'https://api.prizepicks.com/projections',
-            params={'league_id': league_id, 'per_page': 250, 'single_stat': 'true'},
-            headers={
-                'User-Agent': 'Mozilla/5.0 (TrulySporting/1.0)',
-                'Accept': 'application/json',
-            },
-            timeout=15,
+        from playwright.sync_api import sync_playwright
+    except Exception as e:
+        return pd.DataFrame(), (
+            "Playwright is required for OddsAssist scraping. "
+            "Install with: pip install playwright && playwright install chromium"
         )
-        resp.raise_for_status()
-        data = resp.json()
+
+    url = f"https://pro.oddsassist.com/league/{page_slug}"
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page(user_agent='Mozilla/5.0')
+            page.goto(url, timeout=60000)
+            page.wait_for_selector('div.text-base.font-semibold', timeout=30000)
+            page.wait_for_timeout(3000)
+            raw_rows = page.evaluate('''() => {
+                const rows = [];
+                const headers = Array.from(document.querySelectorAll('div.text-base.font-semibold'));
+                for (const header of headers) {
+                    const title = header.innerText.trim();
+                    const titleParts = title.split(' @ ');
+                    const away_team = titleParts[0] ? titleParts[0].trim() : '';
+                    const home_team = titleParts[1] ? titleParts[1].trim() : '';
+                    let time = '';
+                    const timeNode = header.parentElement.querySelector('div.text-xs.text-base-content-lightest');
+                    if (timeNode) time = timeNode.innerText.trim();
+                    const container = header.closest('div.bg-base-100.border.border-border-color.rounded-lg.overflow-hidden');
+                    if (!container) continue;
+                    const sections = Array.from(container.querySelectorAll('div.p-4.bg-base-100'));
+                    for (const sec of sections) {
+                        const market = sec.querySelector('div.text-xs.font-semibold')?.innerText.trim() || '';
+                        const items = Array.from(sec.querySelectorAll('div.space-y-2 > div.flex.items-center.justify-between.gap-2'));
+                        for (const item of items) {
+                            const label = item.querySelector('div.flex.items-center.gap-2.flex-1 span.text-sm')?.innerText.trim() || '';
+                            const odds = item.querySelector('div.flex.items-center.gap-2 span.font-semibold.text-sm')?.innerText.trim() || '';
+                            const bookmakerImg = item.querySelector('div.flex.items-center.gap-2 img.rounded-sm');
+                            const book = bookmakerImg?.getAttribute('title') || bookmakerImg?.getAttribute('alt') || '';
+                            const betLink = item.querySelector('a[data-google-tag]')?.href || '';
+                            rows.push({
+                                'Match': title,
+                                'Away Team': away_team,
+                                'Home Team': home_team,
+                                'Kickoff': time,
+                                'Market': market,
+                                'Selection': label,
+                                'Odds': odds,
+                                'Bookmaker': book,
+                                'Link': betLink,
+                            });
+                        }
+                    }
+                }
+                return rows;
+            ''')
+            browser.close()
     except Exception as e:
         return pd.DataFrame(), str(e)
 
-    players = {
-        p['id']: p.get('attributes', {})
-        for p in data.get('included', [])
-        if p.get('type') == 'new_player'
-    }
-    rows: List[Dict] = []
-    for proj in data.get('data', []):
-        attrs = proj.get('attributes', {})
-        rels  = proj.get('relationships', {})
-        pid   = (rels.get('new_player') or {}).get('data', {}).get('id', '')
-        pl    = players.get(pid, {})
-        st_val = attrs.get('start_time', '')
-        rows.append({
-            'Player':   pl.get('display_name', attrs.get('description', '—')),
-            'Team':     pl.get('team', ''),
-            'Position': pl.get('position', ''),
-            'Stat':     attrs.get('stat_type', ''),
-            'Line':     attrs.get('line_score', ''),
-            'Tip-off':  st_val[:16].replace('T', ' ') if st_val else '',
-            'Source':   'PrizePicks',
-        })
-    if not rows:
-        return pd.DataFrame(), 'No projections returned from PrizePicks.'
-    return pd.DataFrame(rows), ''
+    if not raw_rows:
+        return pd.DataFrame(), 'No OddsAssist lines were found on the league page.'
+    return pd.DataFrame(raw_rows), ''
 
 
 def _fetch_draftkings_lines(ep_key: str) -> Tuple[pd.DataFrame, str]:
@@ -9848,7 +9881,7 @@ def main():
         _lp_eps_raw = json.loads(db.get_config('active_endpoints', '[]'))
         _lp_supported_eps = [
             ep for ep in _lp_eps_raw
-            if ep in _DK_GROUP_MAP or ep in _PP_EP_MAP or ep in _OH_LEAGUE_MAP
+            if ep in _DK_GROUP_MAP or ep in _PP_EP_MAP or ep in _OH_LEAGUE_MAP or ep in _ODDSASSIST_LEAGUE_MAP
         ]
         if not _lp_supported_eps:
             st.info(
@@ -9898,6 +9931,9 @@ def main():
                         for mkt, books in odds.items():
                             if not isinstance(books, dict):
                                 continue
+                            away_team, home_team = ('', '')
+                            if ' @ ' in matchup:
+                                away_team, home_team = [x.strip() for x in matchup.split(' @ ', 1)]
                             for book, vals in books.items():
                                 if not isinstance(vals, (list, tuple)):
                                     continue
@@ -9905,12 +9941,14 @@ def main():
                                 row = {
                                     'Match': matchup,
                                     'Date': date,
+                                    'Away Team': away_team,
+                                    'Home Team': home_team,
                                     'Market': _format_oddsharvester_market(mkt),
                                     'Raw Market': mkt,
                                     'Bookmaker': book,
-                                    'Home': formatted.get('Home', ''),
-                                    'Draw': formatted.get('Draw', ''),
-                                    'Away': formatted.get('Away', ''),
+                                    'Home Odds': formatted.get('Home', ''),
+                                    'Draw Odds': formatted.get('Draw', ''),
+                                    'Away Odds': formatted.get('Away', ''),
                                     'A': formatted.get('A', ''),
                                     'B': formatted.get('B', ''),
                                     'Odds': formatted.get('Odds', '—'),
@@ -9919,8 +9957,9 @@ def main():
                     df = pd.DataFrame(rows)
                     if not df.empty:
                         display_cols = [c for c in [
-                            'Match', 'Date', 'Market', 'Bookmaker',
-                            'Home', 'Draw', 'Away', 'A', 'B', 'Odds', 'Raw Market'
+                            'Match', 'Date', 'Away Team', 'Home Team',
+                            'Market', 'Bookmaker', 'Home Odds', 'Draw Odds',
+                            'Away Odds', 'A', 'B', 'Odds', 'Raw Market'
                         ] if c in df.columns]
                         st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
                         st.caption(
@@ -9932,53 +9971,32 @@ def main():
                 with st.expander("Debug / Raw Output"):
                     st.write(_oh_msg)
 
-            # ── Player Props sub-tab ────────────────────────────────
+            # ── OddsAssist sub-tab ─────────────────────────────────
             with _lp_t_props:
-                st.subheader("Player Props — Multi-Source Comparison")
-                # OddsHarvester does not provide player props; use PrizePicks and DraftKings
-                _lp_pp_name = _PP_EP_MAP.get(_lp_sel_ep)
-                _lp_pp_df, _lp_pp_err = (None, None)
-                if _lp_pp_name:
-                    _lp_pp_key = f'lp_pp_{_lp_sel_ep}'
-                    _lp_pp_refresh = st.button("↺ Refresh PrizePicks", key='lp_pp_refresh')
-                    if _lp_pp_refresh or _lp_pp_key not in st.session_state:
-                        with st.spinner(f"Fetching PrizePicks {_lp_pp_name} projections…"):
-                            st.session_state[_lp_pp_key] = _fetch_prizepicks(_lp_pp_name)
-                    _lp_pp_df, _lp_pp_err = st.session_state[_lp_pp_key]
-                # DraftKings
-                _lp_dk_cmp_key = f'lp_dk_{_lp_sel_ep}'
-                _lp_dk_cmp_df, _ = st.session_state.get(_lp_dk_cmp_key, (None, None))
-                # Merge all sources into one table
-                rows = []
-                if _lp_pp_df is not None and not _lp_pp_df.empty:
-                    for _, row in _lp_pp_df.iterrows():
-                        rows.append({
-                            'Player': row.get('Player'),
-                            'Team': row.get('Team'),
-                            'Stat': row.get('Stat'),
-                            'Line': row.get('Line'),
-                            'Source': 'PrizePicks',
-                        })
-                if _lp_dk_cmp_df is not None and not _lp_dk_cmp_df.empty:
-                    for _, row in _lp_dk_cmp_df.iterrows():
-                        if row.get('Market') not in ('Spread', 'Total', 'Moneyline', 'Line'):
-                            rows.append({
-                                'Player': row.get('Game'),
-                                'Team': '',
-                                'Stat': row.get('Market'),
-                                'Line': row.get('Line'),
-                                'Source': 'DraftKings',
-                            })
-                df = pd.DataFrame(rows)
-                if not df.empty:
-                    st.dataframe(df, use_container_width=True, hide_index=True)
-                    st.caption("All available player props from PrizePicks and DraftKings.")
+                st.subheader("📊 OddsAssist — Live Market Odds")
+                _lp_oa_key = f'lp_oa_{_lp_sel_ep}'
+                _lp_oa_refresh = st.button("↺ Refresh OddsAssist", key='lp_oa_refresh')
+                if _lp_oa_refresh or _lp_oa_key not in st.session_state:
+                    with st.spinner("Fetching OddsAssist odds…"):
+                        st.session_state[_lp_oa_key] = _fetch_oddsassist_lines(_lp_sel_ep)
+                _lp_oa_df, _lp_oa_err = st.session_state[_lp_oa_key]
+                if _lp_oa_err:
+                    st.warning(f"OddsAssist: {_lp_oa_err}")
+                elif _lp_oa_df.empty:
+                    st.info("No OddsAssist odds found for this league.")
                 else:
-                    st.info("No player props found for this league.")
-                if _lp_pp_err:
-                    st.warning(f"PrizePicks: {_lp_pp_err}")
+                    _lp_oa_df = _lp_oa_df.copy()
+                    display_cols = [c for c in [
+                        'Match', 'Date', 'Kickoff', 'Away Team', 'Home Team',
+                        'Market', 'Selection', 'Odds', 'Bookmaker', 'Link'
+                    ] if c in _lp_oa_df.columns]
+                    st.dataframe(_lp_oa_df[display_cols], use_container_width=True, hide_index=True)
+                    st.caption(
+                        "OddsAssist lines are scraped live from the league page, "
+                        "with match teams, market, selection, odds, and sportsbook."
+                    )
                 with st.expander("Debug / Raw Output"):
-                    st.write(_lp_pp_err)
+                    st.write(_lp_oa_err)
 
             # ── OddsHarvester sub-tab ───────────────────────────────
             with _lp_t_oh:
