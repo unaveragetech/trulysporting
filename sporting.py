@@ -9868,7 +9868,6 @@ def main():
                                     'Away': str(vals[2]) if len(vals) > 2 else '—',
                                 }
                                 rows.append(row)
-                    import pandas as pd
                     df = pd.DataFrame(rows)
                     if not df.empty:
                         st.dataframe(df, use_container_width=True, hide_index=True)
