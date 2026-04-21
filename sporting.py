@@ -9825,6 +9825,7 @@ def main():
 
             # ── Game Lines sub-tab ──────────────────────────────────
             with _lp_t_game:
+                import pandas as pd
                 st.subheader("🕷 OddsHarvester — Multi-Bookmaker Game Lines")
                 _oh_s, _oh_l = _OH_LEAGUE_MAP.get(_lp_sel_ep, (None, None))
                 _oh_market = st.selectbox(
