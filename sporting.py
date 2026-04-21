@@ -927,6 +927,49 @@ def _get_espn_pickcenter(db_inst: Any, ep_key: str) -> Tuple[pd.DataFrame, str]:
     return pd.DataFrame(rows), ''
 
 
+def _format_oddsharvester_market(raw: str) -> str:
+    raw = str(raw or '').strip()
+    if not raw:
+        return ''
+    if raw == 'moneyline':
+        return 'Moneyline'
+    if raw == 'over_under':
+        return 'Total'
+    if raw == '1x2':
+        return '1X2'
+    if raw == 'btts':
+        return 'Both Teams To Score'
+    if raw == 'double_chance':
+        return 'Double Chance'
+    if raw.startswith('asian_handicap_'):
+        return 'Asian Handicap ' + raw[len('asian_handicap_'):].replace('_', '.')
+    if raw.startswith('cap_'):
+        return 'Cap ' + raw[len('cap_'):].replace('_', '.')
+    if raw.startswith('over_under_'):
+        return 'Total ' + raw[len('over_under_'):].replace('_', '.')
+    if raw.startswith('spread_'):
+        return 'Spread ' + raw[len('spread_'):].replace('_', '.')
+    return raw.replace('_', ' ').title()
+
+
+def _format_oddsharvester_values(vals: Any) -> Dict[str, Any]:
+    if not isinstance(vals, (list, tuple)):
+        return {'Odds': str(vals) if vals is not None else '—'}
+    values = [str(v) for v in vals]
+    if len(values) == 1:
+        return {'Odds': values[0]}
+    if len(values) == 2:
+        return {'A': values[0], 'B': values[1], 'Odds': ' | '.join(values)}
+    if len(values) == 3:
+        return {
+            'Home': values[0],
+            'Draw': values[1],
+            'Away': values[2],
+            'Odds': ' | '.join(values),
+        }
+    return {'Odds': ' | '.join(values)}
+
+
 def _run_oddsharvester(sport: str, league: str, market: str) -> Tuple[bool, str, List]:
     """Run OddsHarvester CLI as subprocess. Returns (success, message, list_of_match_dicts)."""
     import subprocess
@@ -9858,20 +9901,32 @@ def main():
                             for book, vals in books.items():
                                 if not isinstance(vals, (list, tuple)):
                                     continue
+                                formatted = _format_oddsharvester_values(vals)
                                 row = {
                                     'Match': matchup,
                                     'Date': date,
-                                    'Market': mkt,
+                                    'Market': _format_oddsharvester_market(mkt),
+                                    'Raw Market': mkt,
                                     'Bookmaker': book,
-                                    'Home': str(vals[0]) if len(vals) > 0 else '—',
-                                    'Draw': str(vals[1]) if len(vals) > 1 else '—',
-                                    'Away': str(vals[2]) if len(vals) > 2 else '—',
+                                    'Home': formatted.get('Home', ''),
+                                    'Draw': formatted.get('Draw', ''),
+                                    'Away': formatted.get('Away', ''),
+                                    'A': formatted.get('A', ''),
+                                    'B': formatted.get('B', ''),
+                                    'Odds': formatted.get('Odds', '—'),
                                 }
                                 rows.append(row)
                     df = pd.DataFrame(rows)
                     if not df.empty:
-                        st.dataframe(df, use_container_width=True, hide_index=True)
-                        st.caption("Best odds are highlighted. Bookmakers: DraftKings, FanDuel, bet365, etc.")
+                        display_cols = [c for c in [
+                            'Match', 'Date', 'Market', 'Bookmaker',
+                            'Home', 'Draw', 'Away', 'A', 'B', 'Odds', 'Raw Market'
+                        ] if c in df.columns]
+                        st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
+                        st.caption(
+                            "OddsHarvester now shows friendly market labels and "
+                            "compact odds values for easier comparison."
+                        )
                     else:
                         st.info("No bookmaker odds found for this market.")
                 with st.expander("Debug / Raw Output"):
