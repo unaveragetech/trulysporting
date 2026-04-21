@@ -9825,7 +9825,6 @@ def main():
 
             # ── Game Lines sub-tab ──────────────────────────────────
             with _lp_t_game:
-                import pandas as pd
                 st.subheader("🕷 OddsHarvester — Multi-Bookmaker Game Lines")
                 _oh_s, _oh_l = _OH_LEAGUE_MAP.get(_lp_sel_ep, (None, None))
                 _oh_market = st.selectbox(
@@ -9895,7 +9894,6 @@ def main():
                 _lp_dk_cmp_key = f'lp_dk_{_lp_sel_ep}'
                 _lp_dk_cmp_df, _ = st.session_state.get(_lp_dk_cmp_key, (None, None))
                 # Merge all sources into one table
-                import pandas as pd
                 rows = []
                 if _lp_pp_df is not None and not _lp_pp_df.empty:
                     for _, row in _lp_pp_df.iterrows():
