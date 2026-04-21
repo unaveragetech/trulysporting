@@ -726,6 +726,251 @@ class ESPNParser:
             return None
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# LINES & PROPS — data-source constants + fetch helpers
+# ═══════════════════════════════════════════════════════════════════════
+
+# ── DraftKings public sportsbook event-group IDs ─────────────────────
+_DK_GROUP_MAP: Dict[str, int] = {
+    'basketball/nba':                       42648,
+    'football/nfl':                         88808,
+    'baseball/mlb':                         84240,
+    'hockey/nhl':                           42133,
+    'basketball/wnba':                      42803,
+    'basketball/mens-college-basketball':   42805,
+    'football/college-football':            87637,
+}
+
+# ── PrizePicks league IDs ─────────────────────────────────────────────
+_PP_LEAGUE_MAP: Dict[str, int] = {
+    'NBA': 7, 'NFL': 9, 'MLB': 2, 'NHL': 8, 'NCAAB': 3, 'NCAAF': 6, 'WNBA': 301,
+}
+
+# ── ESPN ep_key → PrizePicks league name ──────────────────────────────
+_PP_EP_MAP: Dict[str, str] = {
+    'basketball/nba':                       'NBA',
+    'football/nfl':                         'NFL',
+    'baseball/mlb':                         'MLB',
+    'hockey/nhl':                           'NHL',
+    'basketball/mens-college-basketball':   'NCAAB',
+    'football/college-football':            'NCAAF',
+    'basketball/wnba':                      'WNBA',
+}
+
+# ── ESPN ep_key → OddsHarvester (sport, league) CLI args ─────────────
+_OH_LEAGUE_MAP: Dict[str, Tuple[str, str]] = {
+    'basketball/nba':                       ('basketball',        'nba'),
+    'football/nfl':                         ('american-football', 'nfl'),
+    'baseball/mlb':                         ('baseball',          'mlb'),
+    'hockey/nhl':                           ('ice-hockey',        'nhl'),
+    'basketball/mens-college-basketball':   ('basketball',        'ncaa'),
+    'football/college-football':            ('american-football', 'ncaa'),
+}
+
+# ── Human-readable labels for league drop-downs ───────────────────────
+_LP_LEAGUE_LABELS: Dict[str, str] = {
+    'basketball/nba':                       'NBA',
+    'football/nfl':                         'NFL',
+    'baseball/mlb':                         'MLB',
+    'hockey/nhl':                           'NHL',
+    'basketball/mens-college-basketball':   'NCAAB',
+    'football/college-football':            'NCAAF',
+    'basketball/wnba':                      'WNBA',
+    'soccer/eng.1':                         'EPL',
+    'soccer/usa.1':                         'MLS',
+}
+
+
+def _fetch_prizepicks(pp_league: str) -> Tuple[pd.DataFrame, str]:
+    """Fetch PrizePicks projections for a league name (e.g. 'NBA'). Returns (df, error)."""
+    league_id = _PP_LEAGUE_MAP.get(pp_league)
+    if not league_id:
+        return pd.DataFrame(), f"No PrizePicks league ID mapped for '{pp_league}'"
+    try:
+        resp = requests.get(
+            'https://api.prizepicks.com/projections',
+            params={'league_id': league_id, 'per_page': 250, 'single_stat': 'true'},
+            headers={
+                'User-Agent': 'Mozilla/5.0 (TrulySporting/1.0)',
+                'Accept': 'application/json',
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        return pd.DataFrame(), str(e)
+
+    players = {
+        p['id']: p.get('attributes', {})
+        for p in data.get('included', [])
+        if p.get('type') == 'new_player'
+    }
+    rows: List[Dict] = []
+    for proj in data.get('data', []):
+        attrs = proj.get('attributes', {})
+        rels  = proj.get('relationships', {})
+        pid   = (rels.get('new_player') or {}).get('data', {}).get('id', '')
+        pl    = players.get(pid, {})
+        st_val = attrs.get('start_time', '')
+        rows.append({
+            'Player':   pl.get('display_name', attrs.get('description', '—')),
+            'Team':     pl.get('team', ''),
+            'Position': pl.get('position', ''),
+            'Stat':     attrs.get('stat_type', ''),
+            'Line':     attrs.get('line_score', ''),
+            'Tip-off':  st_val[:16].replace('T', ' ') if st_val else '',
+            'Source':   'PrizePicks',
+        })
+    if not rows:
+        return pd.DataFrame(), 'No projections returned from PrizePicks.'
+    return pd.DataFrame(rows), ''
+
+
+def _fetch_draftkings_lines(ep_key: str) -> Tuple[pd.DataFrame, str]:
+    """Fetch DraftKings game lines via public sportsbook API. Returns (df, error)."""
+    group_id = _DK_GROUP_MAP.get(ep_key)
+    if not group_id:
+        return pd.DataFrame(), f"League '{ep_key}' is not mapped to a DraftKings event group."
+    try:
+        url = f"https://sportsbook.draftkings.com/sites/US-SB/api/v5/eventgroups/{group_id}"
+        resp = requests.get(
+            url,
+            headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                'Accept': 'application/json',
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.exceptions.HTTPError as e:
+        code = e.response.status_code if e.response is not None else '?'
+        return pd.DataFrame(), f"HTTP {code} — DraftKings may be geo-restricted outside the US."
+    except Exception as e:
+        return pd.DataFrame(), str(e)
+
+    rows: List[Dict] = []
+    try:
+        for cat in data.get('eventGroup', {}).get('offerCategories', []):
+            if not any(kw in cat.get('name', '') for kw in ('Game', 'Match', 'Line')):
+                continue
+            for sub in cat.get('offerSubcategoryDescriptors', []):
+                market = sub.get('name', '')
+                for offers_list in (sub.get('offerSubcategory') or {}).get('offers', []):
+                    for offer in offers_list:
+                        game_lbl = offer.get('label', '')
+                        for outcome in offer.get('outcomes', []):
+                            rows.append({
+                                'Game':   game_lbl,
+                                'Market': market,
+                                'Side':   outcome.get('label', ''),
+                                'Line':   outcome.get('line', ''),
+                                'Odds':   outcome.get('oddsAmerican',
+                                                       outcome.get('oddsDecimal', '')),
+                            })
+    except Exception as e:
+        return pd.DataFrame(), f"Response parse error: {e}"
+
+    if not rows:
+        return pd.DataFrame(), 'No game-line offers found in DraftKings response.'
+    return pd.DataFrame(rows), ''
+
+
+def _get_espn_pickcenter(db_inst: Any, ep_key: str) -> Tuple[pd.DataFrame, str]:
+    """Pull stored ESPN pickcenter odds from game_summaries. Returns (df, error)."""
+    try:
+        con = sqlite3.connect(db_inst.db_name)
+        df_raw = pd.read_sql(
+            '''SELECT h.home_team, h.away_team, h.date,
+                      s.pickcenter_json, s.home_abbr, s.away_abbr
+               FROM game_summaries s
+               JOIN game_history h ON h.event_id = s.event_id
+                                  AND h.sport_key = s.sport_key
+               WHERE s.sport_key = ?
+                 AND s.pickcenter_json NOT IN ('[]', '')
+                 AND s.pickcenter_json IS NOT NULL
+               ORDER BY h.date DESC
+               LIMIT 40''',
+            con,
+            params=(ep_key,),
+        )
+        con.close()
+    except Exception as e:
+        return pd.DataFrame(), str(e)
+
+    if df_raw.empty:
+        return pd.DataFrame(), 'No ESPN pickcenter data stored for this league yet.'
+
+    rows: List[Dict] = []
+    for _, row in df_raw.iterrows():
+        try:
+            pc_list = json.loads(row['pickcenter_json'])
+        except Exception:
+            continue
+        if not isinstance(pc_list, list) or not pc_list:
+            continue
+        pc   = pc_list[0]
+        away = row.get('away_abbr') or row.get('away_team', '?')
+        home = row.get('home_abbr') or row.get('home_team', '?')
+        rows.append({
+            'Game':     f"{away} @ {home}",
+            'Date':     row.get('date', ''),
+            'Provider': pc.get('provider', '—'),
+            'Spread':   pc.get('details', '—'),
+            'O/U':      pc.get('overUnder', '—'),
+            'Home ML':  pc.get('home_ml', '—'),
+            'Away ML':  pc.get('away_ml', '—'),
+        })
+    if not rows:
+        return pd.DataFrame(), 'Pickcenter entries exist but contain no odds data.'
+    return pd.DataFrame(rows), ''
+
+
+def _run_oddsharvester(sport: str, league: str, market: str) -> Tuple[bool, str, List]:
+    """Run OddsHarvester CLI as subprocess. Returns (success, message, list_of_match_dicts)."""
+    import subprocess
+    import sys
+    import tempfile
+    import pathlib as _pl
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        out_path = os.path.join(tmp_dir, 'oh_out')
+        cmd = [
+            sys.executable, '-m', 'oddsharvester', 'upcoming',
+            '-s', sport,
+            '-l', league,
+            '-m', market,
+            '--headless',
+            '--format', 'json',
+            '-o', out_path,
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        except FileNotFoundError:
+            return False, 'oddsharvester not found — run: pip install oddsharvester', []
+        except subprocess.TimeoutExpired:
+            return False, 'Timed out after 120 seconds.', []
+        except Exception as e:
+            return False, str(e), []
+
+        if result.returncode != 0:
+            err = (result.stderr or result.stdout or 'Unknown error')[-600:]
+            return False, err, []
+
+        # OddsHarvester may append .json to the -o argument
+        for cp in [out_path + '.json', out_path, os.path.join(tmp_dir, 'oh_out.json')]:
+            if os.path.exists(cp):
+                try:
+                    txt     = _pl.Path(cp).read_text(encoding='utf-8')
+                    parsed  = json.loads(txt)
+                    matches = parsed if isinstance(parsed, list) else [parsed]
+                    return True, f"Fetched {len(matches)} matches", matches
+                except Exception as pe:
+                    return False, f"JSON parse error: {pe}", []
+        return False, 'Output file not found — check oddsharvester output path.', []
+
+
 class EndpointRegistry:
     # Using https (consistent with actual API responses)
     BASE_URL = "https://site.api.espn.com/apis/site/v2/sports"
@@ -5376,7 +5621,7 @@ def main():
         return False
 
     # ── TABS ──────────────────────────────────────────────────
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13 = st.tabs([
         "🏅 Scoreboard",
         "📈 Team Trends",
         "👤 Player Trends",
@@ -5388,6 +5633,7 @@ def main():
         "🔍 Raw Inspector",
         "📋 Custom Views",
         "🛠 Admin Panel",
+        "🎯 Lines & Props",
         "💚 Support",
     ])
 
@@ -9534,8 +9780,301 @@ def main():
                             st.success(f"Deleted {_cvf10}")
                             st.rerun()
 
-    # ── TAB 12: SUPPORT / DONATE ───────────────────────────────
+    # ── TAB 12: LINES & PROPS ─────────────────────────────────
     with tab12:
+        _lp_theme = _get_sport_theme(st.session_state.get('active_sport', ''))
+        st.markdown(
+            f"<div style='background:linear-gradient(135deg,"
+            f"{_lp_theme['primary']},{_lp_theme['secondary']});"
+            f"border-radius:12px;padding:20px 28px 14px;"
+            f"margin-bottom:18px;color:#fff;'>"
+            f"<h2 style='margin:0 0 6px;font-size:1.55rem;'>🎯 Lines &amp; Props</h2>"
+            f"<p style='margin:0;opacity:.85;font-size:.9rem;'>"
+            f"Live game odds · player props · multi-source comparison<br>"
+            f"<b>Sources:</b> ESPN Pickcenter · DraftKings · PrizePicks · "
+            f"OddsHarvester (OddsPortal 40+ books)"
+            f"</p></div>"
+            f"<p style='font-size:.75rem;color:#888;margin-bottom:14px;'>"
+            f"⚠️ Informational &amp; entertainment purposes only. "
+            f"Not financial or betting advice.</p>",
+            unsafe_allow_html=True,
+        )
+
+        _lp_eps_raw = json.loads(db.get_config('active_endpoints', '[]'))
+        _lp_supported_eps = [
+            ep for ep in _lp_eps_raw
+            if ep in _DK_GROUP_MAP or ep in _PP_EP_MAP or ep in _OH_LEAGUE_MAP
+        ]
+        if not _lp_supported_eps:
+            st.info(
+                "No supported leagues are active. Enable **NBA, NFL, MLB,** or **NHL** "
+                "in ⚙ Settings → Active Leagues."
+            )
+        else:
+            _lp_sel_ep = st.selectbox(
+                "League",
+                _lp_supported_eps,
+                format_func=lambda x: _LP_LEAGUE_LABELS.get(x, x),
+                key='lp_league_sel',
+            )
+
+            _lp_t_game, _lp_t_props, _lp_t_oh = st.tabs(
+                ["🎮 Game Lines", "👤 Player Props", "🕷 OddsHarvester"]
+            )
+
+            # ── Game Lines sub-tab ──────────────────────────────────
+            with _lp_t_game:
+                with st.expander("📡 ESPN Pickcenter (Stored Odds)", expanded=True):
+                    _lp_espn_df, _lp_espn_err = _get_espn_pickcenter(db, _lp_sel_ep)
+                    if _lp_espn_err:
+                        st.caption(f"ESPN: {_lp_espn_err}")
+                    else:
+                        st.caption(
+                            f"Stored pickcenter odds for "
+                            f"**{_LP_LEAGUE_LABELS.get(_lp_sel_ep, _lp_sel_ep)}** "
+                            "— populated during last data sync"
+                        )
+                        st.dataframe(_lp_espn_df, use_container_width=True, hide_index=True)
+
+                st.divider()
+
+                _lp_dk_hdr_col, _lp_dk_btn_col = st.columns([4, 1])
+                with _lp_dk_hdr_col:
+                    st.subheader("🟢 DraftKings — Live Lines")
+                with _lp_dk_btn_col:
+                    st.write("")
+                    _lp_dk_refresh = st.button("↺ Refresh", key='lp_dk_refresh')
+
+                _lp_dk_key = f'lp_dk_{_lp_sel_ep}'
+                if _lp_dk_refresh or _lp_dk_key not in st.session_state:
+                    with st.spinner("Fetching DraftKings lines…"):
+                        st.session_state[_lp_dk_key] = _fetch_draftkings_lines(_lp_sel_ep)
+
+                _lp_dk_df, _lp_dk_err = st.session_state[_lp_dk_key]
+                if _lp_dk_err:
+                    st.warning(f"DraftKings: {_lp_dk_err}")
+                elif _lp_dk_df.empty:
+                    st.info("No game lines returned from DraftKings.")
+                else:
+                    _lp_dk_markets = _lp_dk_df['Market'].unique().tolist()
+                    _lp_dk_mkt = (
+                        st.radio(
+                            "Market", _lp_dk_markets, horizontal=True, key='lp_dk_mkt'
+                        )
+                        if len(_lp_dk_markets) > 1 else _lp_dk_markets[0]
+                    )
+                    _lp_dk_view = _lp_dk_df[_lp_dk_df['Market'] == _lp_dk_mkt].drop(
+                        columns=['Market'], errors='ignore'
+                    )
+                    st.dataframe(_lp_dk_view, use_container_width=True, hide_index=True)
+
+            # ── Player Props sub-tab ────────────────────────────────
+            with _lp_t_props:
+                _lp_pp_name = _PP_EP_MAP.get(_lp_sel_ep)
+                if not _lp_pp_name:
+                    st.info("PrizePicks does not currently support this league.")
+                else:
+                    _lp_pp_hdr_col, _lp_pp_btn_col = st.columns([4, 1])
+                    with _lp_pp_hdr_col:
+                        st.subheader(f"🏆 PrizePicks — {_lp_pp_name}")
+                    with _lp_pp_btn_col:
+                        st.write("")
+                        _lp_pp_refresh = st.button("↺ Refresh", key='lp_pp_refresh')
+
+                    _lp_pp_key = f'lp_pp_{_lp_sel_ep}'
+                    if _lp_pp_refresh or _lp_pp_key not in st.session_state:
+                        with st.spinner(f"Fetching PrizePicks {_lp_pp_name} projections…"):
+                            st.session_state[_lp_pp_key] = _fetch_prizepicks(_lp_pp_name)
+
+                    _lp_pp_df, _lp_pp_err = st.session_state[_lp_pp_key]
+                    if _lp_pp_err:
+                        st.warning(f"PrizePicks: {_lp_pp_err}")
+                    elif _lp_pp_df.empty:
+                        st.info("No projections returned from PrizePicks.")
+                    else:
+                        _lp_pp_f1, _lp_pp_f2 = st.columns(2)
+                        with _lp_pp_f1:
+                            _lp_pp_stat_opts = (
+                                ['All'] + sorted(_lp_pp_df['Stat'].dropna().unique().tolist())
+                            )
+                            _lp_pp_stat = st.selectbox(
+                                "Stat type", _lp_pp_stat_opts, key='lp_pp_stat'
+                            )
+                        with _lp_pp_f2:
+                            _lp_pp_search = st.text_input(
+                                "Search player",
+                                key='lp_pp_search',
+                                placeholder='e.g. LeBron',
+                            )
+
+                        _lp_pp_view = _lp_pp_df.copy()
+                        if _lp_pp_stat != 'All':
+                            _lp_pp_view = _lp_pp_view[_lp_pp_view['Stat'] == _lp_pp_stat]
+                        if _lp_pp_search.strip():
+                            _lp_pp_view = _lp_pp_view[
+                                _lp_pp_view['Player'].str.contains(
+                                    _lp_pp_search.strip(), case=False, na=False
+                                )
+                            ]
+
+                        st.caption(f"**{len(_lp_pp_view)}** props shown")
+                        st.dataframe(_lp_pp_view, use_container_width=True, hide_index=True)
+
+                        # DraftKings player props cross-reference
+                        if _lp_sel_ep in _DK_GROUP_MAP:
+                            st.divider()
+                            st.subheader("📊 DraftKings Comparison")
+                            st.caption(
+                                "Open the Game Lines tab and click Refresh to load "
+                                "DraftKings data, then compare player prop lines here."
+                            )
+                            _lp_dk_cmp_key = f'lp_dk_{_lp_sel_ep}'
+                            if _lp_dk_cmp_key in st.session_state:
+                                _lp_dk_cmp_df, _ = st.session_state[_lp_dk_cmp_key]
+                                if not _lp_dk_cmp_df.empty:
+                                    _lp_dk_props = _lp_dk_cmp_df[
+                                        ~_lp_dk_cmp_df['Market'].str.contains(
+                                            'Spread|Total|Money|Line', na=False
+                                        )
+                                    ]
+                                    if not _lp_dk_props.empty:
+                                        st.dataframe(
+                                            _lp_dk_props,
+                                            use_container_width=True,
+                                            hide_index=True,
+                                        )
+                                    else:
+                                        st.caption(
+                                            "No player prop markets found in current "
+                                            "DraftKings data."
+                                        )
+                            else:
+                                st.caption(
+                                    "DraftKings data not loaded yet — "
+                                    "go to Game Lines and click Refresh."
+                                )
+
+            # ── OddsHarvester sub-tab ───────────────────────────────
+            with _lp_t_oh:
+                st.subheader("🕷 OddsHarvester — OddsPortal Multi-Bookmaker Scraper")
+                st.caption(
+                    "OddsHarvester scrapes [OddsPortal.com](https://www.oddsportal.com) "
+                    "to aggregate live odds from 40+ bookmakers including DraftKings, "
+                    "FanDuel, bet365, and William Hill.  "
+                    "Powered by [jordantete/OddsHarvester]"
+                    "(https://github.com/jordantete/OddsHarvester)."
+                )
+
+                import importlib.util as _ilu
+                _lp_oh_installed = _ilu.find_spec('oddsharvester') is not None
+                if _lp_oh_installed:
+                    st.success("oddsharvester is installed ✓")
+                else:
+                    st.warning("oddsharvester is not installed.")
+                    st.code(
+                        "pip install oddsharvester\nplaywright install chromium",
+                        language="bash",
+                    )
+                    st.caption(
+                        "Restart the app after installing for the Run button to activate."
+                    )
+
+                st.divider()
+
+                _lp_oh_ep_opts  = list(_OH_LEAGUE_MAP.keys())
+                _lp_oh_def_idx  = (
+                    _lp_oh_ep_opts.index(_lp_sel_ep)
+                    if _lp_sel_ep in _lp_oh_ep_opts else 0
+                )
+                _lp_oh_ep = st.selectbox(
+                    "League",
+                    _lp_oh_ep_opts,
+                    index=_lp_oh_def_idx,
+                    format_func=lambda x: _LP_LEAGUE_LABELS.get(x, x),
+                    key='lp_oh_ep',
+                )
+                _lp_oh_mkt = st.selectbox(
+                    "Market",
+                    ['moneyline', 'over_under', '1x2',
+                     'asian_handicap', 'btts', 'double_chance'],
+                    key='lp_oh_mkt',
+                )
+                _lp_oh_run = st.button(
+                    "▶ Run OddsHarvester  (takes 60-90 s)",
+                    key='lp_oh_run',
+                    disabled=not _lp_oh_installed,
+                )
+
+                if _lp_oh_run:
+                    _oh_s, _oh_l = _OH_LEAGUE_MAP[_lp_oh_ep]
+                    _oh_lbl = _LP_LEAGUE_LABELS.get(_lp_oh_ep, _lp_oh_ep)
+                    with st.spinner(
+                        f"Scraping OddsPortal — {_oh_lbl} {_lp_oh_mkt}…"
+                    ):
+                        _oh_ok, _oh_msg, _oh_matches = _run_oddsharvester(
+                            _oh_s, _oh_l, _lp_oh_mkt
+                        )
+                    st.session_state['lp_oh_result'] = (_oh_ok, _oh_msg, _oh_matches)
+
+                if 'lp_oh_result' in st.session_state:
+                    _oh_r_ok, _oh_r_msg, _oh_r_matches = st.session_state['lp_oh_result']
+                    if not _oh_r_ok:
+                        st.error(f"OddsHarvester: {_oh_r_msg}")
+                    elif not _oh_r_matches:
+                        st.warning("OddsHarvester returned no matches.")
+                    else:
+                        st.success(
+                            f"✓ {len(_oh_r_matches)} upcoming matches from OddsPortal"
+                        )
+                        # Summary table
+                        _oh_summary = []
+                        for _om in _oh_r_matches:
+                            _om_odds = _om.get('odds', {})
+                            _om_mkt  = next(iter(_om_odds.values()), {}) if _om_odds else {}
+                            _oh_summary.append({
+                                'Match': (
+                                    f"{_om.get('away_team','?')} "
+                                    f"@ {_om.get('home_team','?')}"
+                                ),
+                                'Date':  _om.get('date', ''),
+                                'Books': ', '.join(list(_om_mkt.keys())[:4]),
+                            })
+                        st.dataframe(
+                            pd.DataFrame(_oh_summary),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                        st.caption("Expand a match for full per-bookmaker breakdown:")
+                        for _om in _oh_r_matches[:20]:
+                            _om_name = (
+                                f"{_om.get('away_team','?')} @ {_om.get('home_team','?')}"
+                            )
+                            with st.expander(
+                                f"**{_om_name}** — {_om.get('date','')}"
+                            ):
+                                for _mkt_n, _mkt_o in _om.get('odds', {}).items():
+                                    if not isinstance(_mkt_o, dict):
+                                        continue
+                                    st.caption(f"**{_mkt_n.upper()}**")
+                                    _bk_rows = []
+                                    for _bk, _bv in _mkt_o.items():
+                                        if not isinstance(_bv, (list, tuple)):
+                                            continue
+                                        _bk_rows.append({
+                                            'Bookmaker': _bk,
+                                            'Home': str(_bv[0]) if len(_bv) > 0 else '—',
+                                            'Draw': str(_bv[1]) if len(_bv) > 1 else '—',
+                                            'Away': str(_bv[2]) if len(_bv) > 2 else '—',
+                                        })
+                                    if _bk_rows:
+                                        st.dataframe(
+                                            pd.DataFrame(_bk_rows),
+                                            use_container_width=True,
+                                            hide_index=True,
+                                        )
+
+    # ── TAB 13: SUPPORT / DONATE ───────────────────────────────
+    with tab13:
         _render_donation_page()
 
 
