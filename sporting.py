@@ -9825,135 +9825,106 @@ def main():
 
             # ── Game Lines sub-tab ──────────────────────────────────
             with _lp_t_game:
-                with st.expander("📡 ESPN Pickcenter (Stored Odds)", expanded=True):
-                    _lp_espn_df, _lp_espn_err = _get_espn_pickcenter(db, _lp_sel_ep)
-                    if _lp_espn_err:
-                        st.caption(f"ESPN: {_lp_espn_err}")
+                st.subheader("🕷 OddsHarvester — Multi-Bookmaker Game Lines")
+                _oh_s, _oh_l = _OH_LEAGUE_MAP.get(_lp_sel_ep, (None, None))
+                _oh_market = st.selectbox(
+                    "Market",
+                    ['moneyline', 'over_under', '1x2', 'asian_handicap', 'btts', 'double_chance'],
+                    key='lp_oh_game_market',
+                )
+                _oh_run = st.button("Fetch OddsHarvester Lines", key='lp_oh_game_run')
+                if _oh_run or 'lp_oh_game_result' not in st.session_state:
+                    if not _oh_s or not _oh_l:
+                        st.session_state['lp_oh_game_result'] = (False, 'Unsupported league for OddsHarvester', [])
                     else:
-                        st.caption(
-                            f"Stored pickcenter odds for "
-                            f"**{_LP_LEAGUE_LABELS.get(_lp_sel_ep, _lp_sel_ep)}** "
-                            "— populated during last data sync"
-                        )
-                        st.dataframe(_lp_espn_df, use_container_width=True, hide_index=True)
-
-                st.divider()
-
-                _lp_dk_hdr_col, _lp_dk_btn_col = st.columns([4, 1])
-                with _lp_dk_hdr_col:
-                    st.subheader("🟢 DraftKings — Live Lines")
-                with _lp_dk_btn_col:
-                    st.write("")
-                    _lp_dk_refresh = st.button("↺ Refresh", key='lp_dk_refresh')
-
-                _lp_dk_key = f'lp_dk_{_lp_sel_ep}'
-                if _lp_dk_refresh or _lp_dk_key not in st.session_state:
-                    with st.spinner("Fetching DraftKings lines…"):
-                        st.session_state[_lp_dk_key] = _fetch_draftkings_lines(_lp_sel_ep)
-
-                _lp_dk_df, _lp_dk_err = st.session_state[_lp_dk_key]
-                if _lp_dk_err:
-                    st.warning(f"DraftKings: {_lp_dk_err}")
-                elif _lp_dk_df.empty:
-                    st.info("No game lines returned from DraftKings.")
+                        with st.spinner(f"Scraping OddsPortal for {_LP_LEAGUE_LABELS.get(_lp_sel_ep, _lp_sel_ep)} {_oh_market}…"):
+                            st.session_state['lp_oh_game_result'] = _run_oddsharvester(_oh_s, _oh_l, _oh_market)
+                _oh_ok, _oh_msg, _oh_matches = st.session_state['lp_oh_game_result']
+                if not _oh_ok:
+                    st.error(f"OddsHarvester: {_oh_msg}")
+                elif not _oh_matches:
+                    st.warning("OddsHarvester returned no matches.")
                 else:
-                    _lp_dk_markets = _lp_dk_df['Market'].unique().tolist()
-                    _lp_dk_mkt = (
-                        st.radio(
-                            "Market", _lp_dk_markets, horizontal=True, key='lp_dk_mkt'
-                        )
-                        if len(_lp_dk_markets) > 1 else _lp_dk_markets[0]
-                    )
-                    _lp_dk_view = _lp_dk_df[_lp_dk_df['Market'] == _lp_dk_mkt].drop(
-                        columns=['Market'], errors='ignore'
-                    )
-                    st.dataframe(_lp_dk_view, use_container_width=True, hide_index=True)
+                    # Build bookmaker comparison table
+                    rows = []
+                    for match in _oh_matches:
+                        matchup = f"{match.get('away_team','?')} @ {match.get('home_team','?')}"
+                        date = match.get('date', '')
+                        odds = match.get('odds', {})
+                        for mkt, books in odds.items():
+                            if not isinstance(books, dict):
+                                continue
+                            for book, vals in books.items():
+                                if not isinstance(vals, (list, tuple)):
+                                    continue
+                                row = {
+                                    'Match': matchup,
+                                    'Date': date,
+                                    'Market': mkt,
+                                    'Bookmaker': book,
+                                    'Home': str(vals[0]) if len(vals) > 0 else '—',
+                                    'Draw': str(vals[1]) if len(vals) > 1 else '—',
+                                    'Away': str(vals[2]) if len(vals) > 2 else '—',
+                                }
+                                rows.append(row)
+                    import pandas as pd
+                    df = pd.DataFrame(rows)
+                    if not df.empty:
+                        st.dataframe(df, use_container_width=True, hide_index=True)
+                        st.caption("Best odds are highlighted. Bookmakers: DraftKings, FanDuel, bet365, etc.")
+                    else:
+                        st.info("No bookmaker odds found for this market.")
+                with st.expander("Debug / Raw Output"):
+                    st.write(_oh_msg)
 
             # ── Player Props sub-tab ────────────────────────────────
             with _lp_t_props:
+                st.subheader("Player Props — Multi-Source Comparison")
+                # OddsHarvester does not provide player props; use PrizePicks and DraftKings
                 _lp_pp_name = _PP_EP_MAP.get(_lp_sel_ep)
-                if not _lp_pp_name:
-                    st.info("PrizePicks does not currently support this league.")
-                else:
-                    _lp_pp_hdr_col, _lp_pp_btn_col = st.columns([4, 1])
-                    with _lp_pp_hdr_col:
-                        st.subheader(f"🏆 PrizePicks — {_lp_pp_name}")
-                    with _lp_pp_btn_col:
-                        st.write("")
-                        _lp_pp_refresh = st.button("↺ Refresh", key='lp_pp_refresh')
-
+                _lp_pp_df, _lp_pp_err = (None, None)
+                if _lp_pp_name:
                     _lp_pp_key = f'lp_pp_{_lp_sel_ep}'
+                    _lp_pp_refresh = st.button("↺ Refresh PrizePicks", key='lp_pp_refresh')
                     if _lp_pp_refresh or _lp_pp_key not in st.session_state:
                         with st.spinner(f"Fetching PrizePicks {_lp_pp_name} projections…"):
                             st.session_state[_lp_pp_key] = _fetch_prizepicks(_lp_pp_name)
-
                     _lp_pp_df, _lp_pp_err = st.session_state[_lp_pp_key]
-                    if _lp_pp_err:
-                        st.warning(f"PrizePicks: {_lp_pp_err}")
-                    elif _lp_pp_df.empty:
-                        st.info("No projections returned from PrizePicks.")
-                    else:
-                        _lp_pp_f1, _lp_pp_f2 = st.columns(2)
-                        with _lp_pp_f1:
-                            _lp_pp_stat_opts = (
-                                ['All'] + sorted(_lp_pp_df['Stat'].dropna().unique().tolist())
-                            )
-                            _lp_pp_stat = st.selectbox(
-                                "Stat type", _lp_pp_stat_opts, key='lp_pp_stat'
-                            )
-                        with _lp_pp_f2:
-                            _lp_pp_search = st.text_input(
-                                "Search player",
-                                key='lp_pp_search',
-                                placeholder='e.g. LeBron',
-                            )
-
-                        _lp_pp_view = _lp_pp_df.copy()
-                        if _lp_pp_stat != 'All':
-                            _lp_pp_view = _lp_pp_view[_lp_pp_view['Stat'] == _lp_pp_stat]
-                        if _lp_pp_search.strip():
-                            _lp_pp_view = _lp_pp_view[
-                                _lp_pp_view['Player'].str.contains(
-                                    _lp_pp_search.strip(), case=False, na=False
-                                )
-                            ]
-
-                        st.caption(f"**{len(_lp_pp_view)}** props shown")
-                        st.dataframe(_lp_pp_view, use_container_width=True, hide_index=True)
-
-                        # DraftKings player props cross-reference
-                        if _lp_sel_ep in _DK_GROUP_MAP:
-                            st.divider()
-                            st.subheader("📊 DraftKings Comparison")
-                            st.caption(
-                                "Open the Game Lines tab and click Refresh to load "
-                                "DraftKings data, then compare player prop lines here."
-                            )
-                            _lp_dk_cmp_key = f'lp_dk_{_lp_sel_ep}'
-                            if _lp_dk_cmp_key in st.session_state:
-                                _lp_dk_cmp_df, _ = st.session_state[_lp_dk_cmp_key]
-                                if not _lp_dk_cmp_df.empty:
-                                    _lp_dk_props = _lp_dk_cmp_df[
-                                        ~_lp_dk_cmp_df['Market'].str.contains(
-                                            'Spread|Total|Money|Line', na=False
-                                        )
-                                    ]
-                                    if not _lp_dk_props.empty:
-                                        st.dataframe(
-                                            _lp_dk_props,
-                                            use_container_width=True,
-                                            hide_index=True,
-                                        )
-                                    else:
-                                        st.caption(
-                                            "No player prop markets found in current "
-                                            "DraftKings data."
-                                        )
-                            else:
-                                st.caption(
-                                    "DraftKings data not loaded yet — "
-                                    "go to Game Lines and click Refresh."
-                                )
+                # DraftKings
+                _lp_dk_cmp_key = f'lp_dk_{_lp_sel_ep}'
+                _lp_dk_cmp_df, _ = st.session_state.get(_lp_dk_cmp_key, (None, None))
+                # Merge all sources into one table
+                import pandas as pd
+                rows = []
+                if _lp_pp_df is not None and not _lp_pp_df.empty:
+                    for _, row in _lp_pp_df.iterrows():
+                        rows.append({
+                            'Player': row.get('Player'),
+                            'Team': row.get('Team'),
+                            'Stat': row.get('Stat'),
+                            'Line': row.get('Line'),
+                            'Source': 'PrizePicks',
+                        })
+                if _lp_dk_cmp_df is not None and not _lp_dk_cmp_df.empty:
+                    for _, row in _lp_dk_cmp_df.iterrows():
+                        if row.get('Market') not in ('Spread', 'Total', 'Moneyline', 'Line'):
+                            rows.append({
+                                'Player': row.get('Game'),
+                                'Team': '',
+                                'Stat': row.get('Market'),
+                                'Line': row.get('Line'),
+                                'Source': 'DraftKings',
+                            })
+                df = pd.DataFrame(rows)
+                if not df.empty:
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                    st.caption("All available player props from PrizePicks and DraftKings.")
+                else:
+                    st.info("No player props found for this league.")
+                if _lp_pp_err:
+                    st.warning(f"PrizePicks: {_lp_pp_err}")
+                with st.expander("Debug / Raw Output"):
+                    st.write(_lp_pp_err)
 
             # ── OddsHarvester sub-tab ───────────────────────────────
             with _lp_t_oh:
