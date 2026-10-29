@@ -17,6 +17,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 from odds_page import render_odds_page
+from matchups import render_matchups_page
 
 # ─────────────────────────────────────────────────────────────
 # SCHEMA UTILITIES  (used by SchemaCrawler + Schema Explorer tab)
@@ -971,7 +972,8 @@ class SportsDB:
         self.init_db()
 
     def get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_name)
+        # Generous timeout: box scores are fetched in parallel threads.
+        conn = sqlite3.connect(self.db_name, timeout=30)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -1702,6 +1704,7 @@ class SportsDB:
                 if b.get('media', {}).get('shortName')
             )
             rows.append({
+                'event_id':    str(ev.get('id', '')),
                 'date':        ev.get('date', '')[:10],
                 'name':        ev.get('shortName', ev.get('name', '')),
                 'home_away':   'H' if is_my_home else 'A',
@@ -1796,6 +1799,10 @@ class SportsDB:
             summary.get('away_abbr', ''),
             summary['fetched_at'],
         ))
+        # Commit before flattening: _flatten_player_stats writes on its own
+        # connection and would otherwise block on this one's lock until timeout.
+        conn.commit()
+        conn.close()
         # Also flatten player_stats_json → player_game_stats for the Player Trends tab
         try:
             _ps = json.loads(summary.get('player_stats_json', '[]') or '[]')
@@ -1811,10 +1818,8 @@ class SportsDB:
                 self._flatten_player_stats(
                     summary['event_id'], summary['sport_key'], _gd, _ps
                 )
-        except Exception:
-            pass
-        conn.commit()
-        conn.close()
+        except Exception as e:
+            logging.warning("player stat flatten failed for %s: %s", summary['event_id'], e)
 
     def _flatten_player_stats(self, event_id: str, sport_key: str,
                                game_date: str, player_stats: list):
@@ -3375,6 +3380,62 @@ def _inj_badge(status: str) -> str:
             f'border-radius:3px;font-size:10px">{icon} {status}</span>')
 
 
+def _auto_once(flag: str, label: str, fn, *args, **kwargs) -> bool:
+    """Run an ESPN fetch once per session for `flag`, so an empty result
+    doesn't trigger a fetch on every rerun. Returns True if it ran."""
+    if st.session_state.get(flag):
+        return False
+    st.session_state[flag] = True
+    with st.spinner(label):
+        try:
+            fn(*args, **kwargs)
+        except Exception as e:
+            st.warning(f"Auto-load failed: {e}")
+    return True
+
+
+def _ensure_teams(db: Any, worker: Any, cat: str, spt: str) -> pd.DataFrame:
+    """Teams for a league, fetched from ESPN automatically if none are stored."""
+    df = db.get_teams_df(f'{cat}/{spt}')
+    if df.empty and _auto_once(f'auto_teams_{cat}_{spt}', 'Loading teams from ESPN…',
+                               worker.fetch_and_process, cat, spt, 'teams',
+                               force_refresh=True):
+        df = db.get_teams_df(f'{cat}/{spt}')
+    return df
+
+
+def _ensure_team_boxscores(db: Any, worker: Any, cat: str, spt: str,
+                           team_id: str, season: int, limit: int = 15) -> int:
+    """Fetch game summaries (box scores) for a team's most recent completed
+    games so player stats exist without visiting the Scoreboard. Once per
+    session per team/season. Returns the number of summaries fetched."""
+    flag = f'auto_box_{cat}_{spt}_{team_id}_{season}'
+    if st.session_state.get(flag):
+        return 0
+    st.session_state[flag] = True
+    try:
+        worker.fetch_team_schedule(cat, spt, team_id, season)
+        sched = db.get_team_schedule_games(cat, spt, team_id, season)
+        if sched.empty:
+            return 0
+        done = sched[sched['completed']].tail(limit)
+        missing = [e for e in done['event_id'] if e and not db.get_game_summary(e)]
+        if missing:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            bar = st.progress(0.0, text=f"Loading {len(missing)} box score(s) from ESPN…")
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                futs = [pool.submit(worker.fetch_game_summary, cat, spt, e) for e in missing]
+                for i, _ in enumerate(as_completed(futs), 1):
+                    bar.progress(i / len(missing), text=f"Loading box scores… {i}/{len(missing)}")
+            bar.empty()
+        db.repopulate_player_game_stats()
+        return len(missing)
+    except Exception as e:
+        st.session_state.pop(flag, None)  # retry on next rerun
+        st.warning(f"Couldn't load box scores automatically: {e}")
+        return 0
+
+
 def render_game_detail(event_id: str, db: Any, home_abbr: str, away_abbr: str):
     """
     Full inside-game view rendered as sub-tabs:
@@ -4903,15 +4964,59 @@ _ADMIN_PW_HASH  = "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d154
 _ADMIN_PIN_HASH = "ff7faf9dc56f2a51cc8c1e19c05e5f6609f01b89cb4e4e70e5a688d3a13d7cf9"
 
 
-_PUBLIC_PAGES = ["🏅 Scoreboard", "🎯 Odds & Lines", "📈 Team Trends", "👤 Player Trends",
-                 "🏟 Teams", "📰 News", "🏆 Rankings", "📋 Custom Views"]
+_PUBLIC_PAGES = ["🏅 Scores", "⚔️ Matchups", "🎯 Odds", "👤 Players", "🏟 Teams",
+                 "📈 Team Trends", "🏆 Rankings", "📰 News", "📋 Custom Views"]
 _ADMIN_PAGES = ["🌐 Network", "🔬 Schema Explorer", "🔍 Raw Inspector", "🛠 Admin Panel"]
 _PAGE_IDS = {
-    "🏅 Scoreboard": 1, "📈 Team Trends": 2, "👤 Player Trends": 3, "🏟 Teams": 4,
+    "🏅 Scores": 1, "📈 Team Trends": 2, "👤 Players": 3, "🏟 Teams": 4,
     "📰 News": 5, "🏆 Rankings": 6, "🌐 Network": 7, "🔬 Schema Explorer": 8,
     "🔍 Raw Inspector": 9, "📋 Custom Views": 10, "🛠 Admin Panel": 11,
-    "💚 Support": 12, "🎯 Odds & Lines": 13,
+    "💚 Support": 12, "🎯 Odds": 13, "⚔️ Matchups": 14,
 }
+# Thumb-reach bottom bar: the four most-used pages + More.
+_BOTTOM_NAV = {"🏅 Scores": "🏅 Scores", "⚔️ Games": "⚔️ Matchups", "🎯 Odds": "🎯 Odds",
+               "👤 Players": "👤 Players", "🧭 More": None}
+
+
+def _goto(page: str, **state) -> None:
+    """Button callback: switch page and pre-set widget state on the target page."""
+    st.session_state.update(state)
+    st.session_state['nav_page'] = page
+    st.session_state['show_more'] = False
+
+
+def _on_bottom_nav() -> None:
+    choice = st.session_state.get('nav_bottom')
+    if choice == '🧭 More':
+        st.session_state['show_more'] = True
+    elif choice in _BOTTOM_NAV:
+        _goto(_BOTTOM_NAV[choice])
+
+
+_BOTTOM_NAV_CSS = """
+<style>
+.st-key-bottom_nav {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 999990;
+  background: #ffffff; border-top: 1px solid #e5e7eb;
+  box-shadow: 0 -4px 14px rgba(0,0,0,.06);
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+}
+.st-key-bottom_nav [data-testid="stButtonGroup"] { width: 100%; }
+.st-key-bottom_nav [data-testid="stButtonGroup"] div:has(> button) { display: flex !important; width: 100% !important; max-width: none !important; gap: 4px; flex-wrap: nowrap !important; }
+.st-key-bottom_nav button {
+  flex: 0 0 calc((100% - 16px) / 5) !important; width: calc((100% - 16px) / 5) !important; min-width: 0 !important; max-width: none !important; min-height: 58px; padding: 4px 2px !important;
+  border-radius: 12px !important;
+  flex-direction: column !important; gap: 2px !important;
+}
+.st-key-bottom_nav button [data-testid="stIconEmoji"] { font-size: 20px; margin: 0 !important; }
+.st-key-bottom_nav button p, .st-key-bottom_nav button [data-testid="stMarkdownContainer"] {
+  font-size: 11px !important; line-height: 1.2 !important;
+  overflow: visible !important; text-overflow: clip !important;
+}
+.block-container { padding-bottom: 96px !important; }
+@media (min-width: 769px) { .st-key-bottom_nav { display: __DISPLAY__; } .block-container { padding-bottom: __PAD__ !important; } }
+</style>
+"""
 
 
 def _page_slug(label: str) -> str:
@@ -5220,7 +5325,7 @@ def main():
     # ── INITIALISE ────────────────────────────────────────────
     # Use a schema/API version stamp so stale cached objects are always replaced
     # on deploy. Bump _APP_VER whenever new methods are added to SportsDB or ESPNWorker.
-    _APP_VER = 8  # bump each time new DB/worker methods are added
+    _APP_VER = 10  # bump each time new DB/worker methods are added
 
     def _fresh_init():
         # One DB + background worker per process (not per browser session),
@@ -5305,9 +5410,21 @@ def main():
         st.session_state['nav_page'] = _nav_opts[0]
     with st.sidebar:
         _nav_page = st.radio('Navigate', _nav_opts, key='nav_page',
-                             label_visibility='collapsed')
+                             label_visibility='collapsed',
+                             on_change=lambda: st.session_state.update(show_more=False))
         st.divider()
     st.query_params['page'] = _page_slug(_nav_page)
+
+    # Bottom bar: always on phones; on wide screens only in Mobile mode.
+    _mobile_mode = st.session_state.get('ui_mode', 'desktop') == 'mobile'
+    _bn_disp, _bn_pad = ('block', '96px') if _mobile_mode else ('none', '1rem')
+    st.html(_BOTTOM_NAV_CSS.replace('__DISPLAY__', _bn_disp).replace('__PAD__', _bn_pad))
+    _bn_current = ('🧭 More' if st.session_state.get('show_more') else
+                   next((k for k, v in _BOTTOM_NAV.items() if v == _nav_page), None))
+    st.session_state['nav_bottom'] = _bn_current
+    with st.container(key='bottom_nav'):
+        st.segmented_control('Pages', list(_BOTTOM_NAV), key='nav_bottom',
+                             on_change=_on_bottom_nav, label_visibility='collapsed')
 
     # ── SIDEBAR ───────────────────────────────────────────────
     with st.sidebar:
@@ -5401,8 +5518,8 @@ def main():
             'steps': [
                 ('1 — Prerequisite', 'Sync the **Scoreboard** tab for this league first. '
                  'Team Trends reads from the stored game history table — no live API call needed.'),
-                ('2 — Select league & team', 'Use the dropdowns at the top. If a team is missing, '
-                 'go to the **Teams** tab → Load Teams first.'),
+                ('2 — Select league & team', 'Use the dropdowns at the top. Teams load '
+                 'automatically the first time you pick a league.'),
                 ('3 — Pick season', 'Season year follows ESPN convention: football = year the '
                  'season *starts*; basketball/hockey = year it *ends*.'),
                 ('Why is the chart empty?', 'Sync more scoreboard dates. The chart plots every '
@@ -5413,16 +5530,11 @@ def main():
             'icon': '👤',
             'summary': 'Drill into per-player boxscore stats, game logs, and play-by-play mentions.',
             'steps': [
-                ('1 — Load Teams', 'Go to the **Teams** tab → select league → **Load Teams**. '
-                 'This fills the team dropdown here.'),
-                ('2 — Load Roster', 'Select a team, then click **🔄 Load Roster**. '
-                 'Players will appear in the dropdown.'),
-                ('3 — Fetch game summaries', 'Go to **Scoreboard** → expand any game → '
-                 '**📊 Fetch Summary**. Do this for multiple games.'),
-                ('4 — Sync Player Stats', 'Click **🔄 Sync Player Stats** (top of this tab) '
-                 'to process all stored summaries into the player boxscore table.'),
-                ('5 — Build Profile', 'Select a player and click **⚙ Build Profile** to '
-                 'aggregate bio, game log, and PBP data into a single cached view.'),
+                ('1 — Pick league, team & player', 'Teams, the roster, and box scores for '
+                 'the team\'s last 15 completed games load from ESPN automatically the first '
+                 'time you pick them.'),
+                ('2 — Refresh', 'Click **🔄 Refresh** to re-pull the roster and box scores. '
+                 '**⚙ Rebuild** re-aggregates the player profile from stored data.'),
                 ('PBP fallback', 'If no boxscore stats exist, the app auto-derives estimates '
                  'from play-by-play text (abbreviated names like *S.Darnold*).'),
             ],
@@ -5432,12 +5544,12 @@ def main():
             'summary': 'Browse full team rosters, records, venues, and coaching staff.',
             'steps': [
                 ('1 — Add a league', 'Add leagues via the sidebar first.'),
-                ('2 — Load Teams', 'Select a league and click **Load Teams**. '
-                 'This fetches all teams in the league from ESPN and caches them locally.'),
+                ('2 — Teams load automatically', 'The first visit to a league fetches all '
+                 'teams from ESPN and caches them. **Load Teams** re-fetches.'),
                 ('3 — Load Detail',  'Click any team row to expand it, then **Load Detail** '
                  'for venue, coaching staff, and season record.'),
-                ('Why are no teams listed?', 'You must click Load Teams at least once per '
-                 'league. Teams are not auto-fetched to avoid unnecessary API calls.'),
+                ('Why are no teams listed?', 'ESPN may not publish teams for this league. '
+                 'Click **Load Teams** to retry.'),
             ],
         },
         'news': {
@@ -5586,6 +5698,15 @@ def main():
     # ── TABS ──────────────────────────────────────────────────
     # Only the selected page runs on each rerun (st.tabs executed all 12).
     _page = _PAGE_IDS.get(_nav_page, 1)
+    if st.session_state.get('show_more'):
+        _page = 0
+        st.markdown('### Where to?')
+        _more = [p for p in _nav_opts if p not in _BOTTOM_NAV.values()]
+        _mc = st.columns(2)
+        for _i, _p in enumerate(_more):
+            _mc[_i % 2].button(_p, key=f'more_{_i}', use_container_width=True,
+                               on_click=_goto, args=(_p,))
+        st.caption('Tip: the bar at the bottom always gets you back to Scores, Games, Odds and Players.')
 
     # ── TAB 1: SCOREBOARD ─────────────────────────────────────
     if _page == 1:
@@ -5821,11 +5942,11 @@ def main():
             with _t2c1:
                 _t2_ep = st.selectbox("League", _t2_active_eps, key="trend_ep")
             _t2_cat, _t2_spt = _t2_ep.split('/')
-            _t2_teams_df = db.get_teams_df(_t2_ep)
+            _t2_teams_df = _ensure_teams(db, worker, _t2_cat, _t2_spt)
 
             with _t2c2:
                 if _t2_teams_df.empty:
-                    st.caption("No teams — Load Teams first.")
+                    st.caption("ESPN returned no teams for this league.")
                     _t2_sel_tid = None
                 else:
                     # Pre-select whatever is chosen in the Teams tab
@@ -6154,35 +6275,6 @@ def main():
         if not _pt_active_eps:
             st.info("Add leagues in the sidebar first.")
         else:
-            # ── Repopulate player stats from existing game summaries ──
-            _pt_repop_key = 'pt_repop_done'
-            _pt_repop_col1, _pt_repop_col2 = st.columns([6, 2])
-            with _pt_repop_col2:
-                if st.button(
-                    "🔄 Sync Player Stats", key="pt_repopulate",
-                    help=(
-                        "Re-processes all stored game summaries to populate "
-                        "per-player boxscore data. Run this once after fetching "
-                        "game Summaries from the Scoreboard tab."
-                    )
-                ):
-                    with st.spinner("Syncing player stats from stored summaries…"):
-                        _n_repop = db.repopulate_player_game_stats()
-                    st.success(f"Synced {_n_repop} game(s). Reload the page to see data.")
-                    st.rerun()
-            with _pt_repop_col1:
-                _pt_pgs_conn = db.get_connection()
-                _pt_pgs_count = _pt_pgs_conn.execute(
-                    "SELECT COUNT(*) FROM player_game_stats"
-                ).fetchone()[0]
-                _pt_pgs_conn.close()
-                if _pt_pgs_count == 0:
-                    st.warning(
-                        "No player boxscore data yet — click **🔄 Sync Player Stats** "
-                        "after fetching game Summaries from the Scoreboard tab."
-                    )
-                else:
-                    st.caption(f"📦 {_pt_pgs_count:,} boxscore stat rows stored across all leagues.")
             # ── Control row ──────────────────────────────────────
             _pt_r1c1, _pt_r1c2, _pt_r1c3 = st.columns([3, 2, 3])
 
@@ -6204,8 +6296,8 @@ def main():
                 )
                 _pt_season_lbl = ESPNWorker._season_label(_pt_cat, _pt_season)
 
-            # ── Team selector — all teams from league first, fall back to roster-only ─
-            _pt_teams_df     = db.get_teams_df(_pt_sport_key)
+            # ── Team selector — teams auto-load from ESPN if none stored ─
+            _pt_teams_df     = _ensure_teams(db, worker, _pt_cat, _pt_spt)
             _pt_roster_teams = db.get_roster_teams_df(_pt_sport_key)
 
             with _pt_r1c3:
@@ -6239,7 +6331,7 @@ def main():
                         key=_pt_team_key
                     )
                 else:
-                    st.caption("No teams loaded — go to 🏟 Teams tab and click Load Teams.")
+                    st.caption("ESPN returned no teams for this league.")
                     _pt_sel_team_id = None
 
             # ── Load Roster button ────────────────────────────────
@@ -6250,24 +6342,35 @@ def main():
                     _pt_team_abbr = _pt_tr.iloc[0]['team_abbr'] if not _pt_tr.empty else ''
 
                 _pt_roster_df = db.get_team_roster_players(_pt_sport_key, _pt_sel_team_id)
+                if _pt_roster_df.empty and _auto_once(
+                        f'auto_roster_{_pt_sport_key}_{_pt_sel_team_id}',
+                        'Loading roster from ESPN…', worker.fetch_team_roster,
+                        _pt_cat, _pt_spt, _pt_sel_team_id, _pt_team_abbr):
+                    _pt_roster_df = db.get_team_roster_players(_pt_sport_key, _pt_sel_team_id)
 
                 _pt_ra, _pt_rb = st.columns([5, 1])
                 with _pt_rb:
                     _pt_load_roster = st.button(
-                        "🔄 Load Roster", key="pt_load_roster",
-                        help="Fetch this team's current roster from ESPN"
+                        "🔄 Refresh", key="pt_load_roster",
+                        help="Re-fetch this team's roster and recent box scores from ESPN"
                     )
                 if _pt_load_roster:
                     with st.spinner(f"Fetching roster for {_pt_team_abbr}…"):
                         worker.fetch_team_roster(_pt_cat, _pt_spt,
                                                  _pt_sel_team_id, _pt_team_abbr)
+                    st.session_state.pop(
+                        f'auto_box_{_pt_cat}_{_pt_spt}_{_pt_sel_team_id}_{_pt_season}', None)
                     st.rerun()
+
+                # Box scores for this team's recent games → player stats.
+                _pt_new_box = _ensure_team_boxscores(db, worker, _pt_cat, _pt_spt,
+                                                     _pt_sel_team_id, _pt_season)
 
                 # ── Player selector ──────────────────────────────
                 if _pt_roster_df.empty:
                     st.info(
-                        f"No roster loaded for this team yet. "
-                        f"Click **🔄 Load Roster** above to pull players from ESPN."
+                        "ESPN returned no roster for this team. "
+                        "Try **🔄 Refresh** above."
                     )
                     _pt_sel_player = None
                     _pt_player_id  = None
@@ -6303,9 +6406,8 @@ def main():
                     with _pt_player_col2:
                         st.write("")
                         _pt_build_btn = st.button(
-                            "⚙ Build Profile", key="pt_build_profile",
-                            type="primary",
-                            help="Aggregate all ESPN + boxscore + PBP data for this player"
+                            "⚙ Rebuild", key="pt_build_profile",
+                            help="Re-aggregate boxscore + PBP data for this player"
                         )
 
                     # ── Load local DB data immediately — no ESPN API needed ─
@@ -6315,11 +6417,12 @@ def main():
                     _pbp_live  = db.get_player_pbp_mentions(_pt_sport_key, _pt_sel_player)
                     _roster_bio = _pt_player_row.iloc[0].to_dict() if not _pt_player_row.empty else {}
 
-                    # Build profile (DB-only, no ESPN calls) only on explicit button click
+                    # Profile is DB-only (no ESPN calls), so build it automatically
+                    # when missing or when new box scores just arrived.
                     _pt_profile_cached = db.get_player_profile(
                         _pt_sport_key, str(_pt_player_id), _pt_season
                     )
-                    if _pt_build_btn:
+                    if _pt_build_btn or _pt_new_box or not _pt_profile_cached:
                         with st.spinner(f"Caching profile for **{_pt_sel_player}**…"):
                             worker.build_and_cache_player_profile(
                                 _pt_cat, _pt_spt,
@@ -6330,7 +6433,8 @@ def main():
                         _pt_profile_cached = db.get_player_profile(
                             _pt_sport_key, str(_pt_player_id), _pt_season
                         )
-                        st.rerun()
+                        if _pt_build_btn:
+                            st.rerun()
 
                     # ── Player header card — sources: roster table ──
                     _hs_url   = _roster_bio.get('headshot_url', '')
@@ -6367,7 +6471,7 @@ def main():
                             f"📦 {len(_pgs_live)} boxscore rows"
                             + (f"  ·  🎯 {len(_pbp_live)} PBP plays" if not _pbp_live.empty else '')
                             + (f"  ·  Profile cached {_pt_profile_cached.get('built_at','')[:10]}"
-                               if _pt_profile_cached else "  ·  *Click ⚙ Build Profile to cache*")
+                               if _pt_profile_cached else '')
                         )
                         st.caption(_data_hint)
 
@@ -6386,9 +6490,8 @@ def main():
                         import json as _jpt_s
                         if _pgs_live.empty:
                             st.info(
-                                "No boxscore data for this player yet. "
-                                "Fetch game **Summaries** from the Scoreboard tab first, "
-                                "then come back here."
+                                "No boxscore rows for this player in the team's recent "
+                                "games — they may not have played yet this season."
                             )
                         else:
                             _cats_avail = sorted(_pgs_live['category'].unique())
@@ -6454,7 +6557,7 @@ def main():
                     with _ptsub2:
                         import json as _jpt_g
                         if _pgs_live.empty:
-                            st.info("No game log data. Fetch Summaries from the Scoreboard tab.")
+                            st.info("No game log yet — this player has no recorded box scores this season.")
                         else:
                             try:
                                 _glbl0 = _jpt_g.loads(_pgs_live.iloc[0]['stat_labels'])
@@ -6488,7 +6591,7 @@ def main():
                         import plotly.graph_objects as _go_pt
                         import json as _jpt_c
                         if _pgs_live.empty:
-                            st.info("No data to chart. Fetch Summaries from the Scoreboard tab.")
+                            st.info("No data to chart yet — this player has no recorded box scores this season.")
                         else:
                             _ch_cats = sorted(_pgs_live['category'].unique())
                             _ch_cat_sel = st.selectbox("Category", _ch_cats, key="pt_chart_cat")
@@ -7185,9 +7288,14 @@ def main():
             if _r5_has_polls:
                 st.markdown("### 📊 Poll Rankings")
                 _r5_df = db.get_rankings_df(_r5_ep)
+                if _r5_df.empty and _auto_once(
+                        f'auto_rank_{_r5_ep}', 'Loading rankings from ESPN…',
+                        worker.fetch_and_process, _r5_cat, _r5_spt, 'rankings',
+                        force_refresh=True):
+                    _r5_df = db.get_rankings_df(_r5_ep)
 
                 if _r5_df.empty:
-                    st.info("No rankings — click **🔄 Rankings** or **🔄 Both**.")
+                    st.info("ESPN has no poll rankings for this league right now.")
                 else:
                     _r5_polls = _r5_df['poll'].unique().tolist()
                     _r5_poll_tabs = st.tabs(_r5_polls)
@@ -7335,9 +7443,13 @@ def main():
             # ══════════════════════════════════════════════════
             st.markdown("### 📋 Standings")
             _r5s_df = db.get_standings_df(_r5_cat, _r5_spt)
+            if _r5s_df.empty and _auto_once(
+                    f'auto_stand_{_r5_ep}', 'Loading standings from ESPN…',
+                    worker.fetch_standings, _r5_cat, _r5_spt):
+                _r5s_df = db.get_standings_df(_r5_cat, _r5_spt)
 
             if _r5s_df.empty:
-                st.info("No standings yet — click **🔄 Standings** or **🔄 Both**.")
+                st.info("ESPN has no standings for this league right now.")
             else:
                 _r5s_best  = _r5s_df.sort_values('win_pct', ascending=False).iloc[0]
                 _r5s_most  = _r5s_df.sort_values('wins',    ascending=False).iloc[0]
@@ -7510,13 +7622,9 @@ def main():
                 "with a live record tracker. Use the slider or Play button."
             )
 
-            _r5c_teams_df = db.get_teams_df(_r5_ep)
+            _r5c_teams_df = _ensure_teams(db, worker, _r5_cat, _r5_spt)
             if _r5c_teams_df.empty:
-                st.info(
-                    "No team roster loaded for this league. "
-                    "Go to the **🏟 Teams** tab, select this league, "
-                    "click **🔄 Load Teams**, then return here."
-                )
+                st.info("ESPN returned no teams for this league.")
             else:
                 _r5c_c1, _r5c_c2, _r5c_c3 = st.columns([4, 1, 1])
                 with _r5c_c1:
@@ -7559,6 +7667,12 @@ def main():
 
                 _r5c_sched = db.get_team_schedule_games(
                     _r5_cat, _r5_spt, _r5c_sel_id, _r5c_season)
+                if _r5c_sched.empty and _auto_once(
+                        f'auto_sched_{_r5_ep}_{_r5c_sel_id}_{_r5c_season}',
+                        'Loading schedule from ESPN…', worker.fetch_team_schedule,
+                        _r5_cat, _r5_spt, _r5c_sel_id, _r5c_season):
+                    _r5c_sched = db.get_team_schedule_games(
+                        _r5_cat, _r5_spt, _r5c_sel_id, _r5c_season)
                 _r5c_done = (
                     pd.DataFrame() if _r5c_sched.empty
                     else _r5c_sched[_r5c_sched['completed']]
@@ -7568,7 +7682,7 @@ def main():
                 if _r5c_done.empty:
                     st.info(
                         f"No completed games found for **{_r5c_name}** "
-                        f"({_r5c_season_lbl}). Click **🔄 Load Schedule** above."
+                        f"({_r5c_season_lbl}) yet."
                     )
                 else:
                     _r5c_done = _r5c_done.copy()
@@ -9737,6 +9851,10 @@ def main():
 
     if _page == 13:
         render_odds_page(db)
+
+    if _page == 14:
+        render_matchups_page(db, worker, ESPNWorker._espn_season_year,
+                             _ensure_team_boxscores, _goto)
 
 
 if __name__ == "__main__":
