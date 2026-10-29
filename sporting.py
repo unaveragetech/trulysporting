@@ -16,6 +16,7 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
+from odds_page import render_odds_page
 
 # ─────────────────────────────────────────────────────────────
 # SCHEMA UTILITIES  (used by SchemaCrawler + Schema Explorer tab)
@@ -1602,31 +1603,6 @@ class SportsDB:
         return df
 
     def get_most_recent_games_df(self, category: str, sport: str,
-                                 limit: int = 30) -> pd.DataFrame:
-        """Return the most recently stored games regardless of date."""
-        conn = self.get_connection()
-        df = pd.read_sql_query(
-            """SELECT * FROM game_history
-               WHERE category=? AND sport=?
-               ORDER BY event_date DESC, id DESC LIMIT ?""",
-            conn, params=(category, sport, limit)
-        )
-        conn.close()
-        return df
-
-    def get_latest_stored_date(self, category: str, sport: str) -> Optional[str]:
-        """Most recent event_date stored for a sport (YYYY-MM-DD)."""
-        conn = self.get_connection()
-        c = conn.cursor()
-        c.execute(
-            "SELECT MAX(event_date) FROM game_history WHERE category=? AND sport=?",
-            (category, sport)
-        )
-        row = c.fetchone()
-        conn.close()
-        return row[0] if row and row[0] else None
-
-    def get_most_recent_games_df(self, category: str, sport: str,
                                  limit: int = 20) -> pd.DataFrame:
         """Return the most recently stored games for a sport regardless of date."""
         conn = self.get_connection()
@@ -2637,6 +2613,75 @@ class SportsDB:
 # ─────────────────────────────────────────────────────────────
 # 3. WORKER ENGINE
 # ─────────────────────────────────────────────────────────────
+
+
+# ─────────────────────────────────────────────────────────────
+# READ CACHE — memoises SportsDB get_* reads across reruns and sessions.
+# Any write method (save_*, update_config, …) bumps a generation counter,
+# which invalidates every cached read, so results are never stale.
+# ─────────────────────────────────────────────────────────────
+import copy as _copy
+import functools as _functools
+
+_READ_CACHE: Dict[Any, Tuple[int, float, Any]] = {}
+_READ_CACHE_LOCK = threading.Lock()
+_READ_GEN = {'n': 0}
+_READ_TTL = 300  # seconds; safety net for writes made outside SportsDB methods
+_READ_CACHE_MAX = 2000
+
+
+def _clone(v: Any) -> Any:
+    if isinstance(v, pd.DataFrame):
+        return v.copy()
+    if isinstance(v, (dict, list)):
+        return _copy.deepcopy(v)
+    return v
+
+
+def _cached_read(fn):
+    @_functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        try:
+            key = (self.db_name, fn.__name__, args, tuple(sorted(kwargs.items())))
+            hash(key)
+        except TypeError:
+            return fn(self, *args, **kwargs)
+        now = time.time()
+        hit = _READ_CACHE.get(key)
+        if hit and hit[0] == _READ_GEN['n'] and now - hit[1] < _READ_TTL:
+            return _clone(hit[2])
+        gen = _READ_GEN['n']
+        val = fn(self, *args, **kwargs)
+        with _READ_CACHE_LOCK:
+            if len(_READ_CACHE) > _READ_CACHE_MAX:
+                _READ_CACHE.clear()
+            _READ_CACHE[key] = (gen, now, val)
+        return _clone(val)
+    return wrapper
+
+
+def _invalidating(fn):
+    @_functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return fn(self, *args, **kwargs)
+        finally:
+            _READ_GEN['n'] += 1
+    return wrapper
+
+
+def clear_read_cache():
+    _READ_GEN['n'] += 1
+    with _READ_CACHE_LOCK:
+        _READ_CACHE.clear()
+
+
+for _name, _fn in list(vars(SportsDB).items()):
+    if not callable(_fn) or _name.startswith('_') or _name in ('get_connection', 'init_db'):
+        continue
+    setattr(SportsDB, _name,
+            _cached_read(_fn) if _name.startswith('get_') else _invalidating(_fn))
+
 
 class ESPNWorker:
     def __init__(self, db: SportsDB):
@@ -4858,6 +4903,29 @@ _ADMIN_PW_HASH  = "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d154
 _ADMIN_PIN_HASH = "ff7faf9dc56f2a51cc8c1e19c05e5f6609f01b89cb4e4e70e5a688d3a13d7cf9"
 
 
+_PUBLIC_PAGES = ["🏅 Scoreboard", "🎯 Odds & Lines", "📈 Team Trends", "👤 Player Trends",
+                 "🏟 Teams", "📰 News", "🏆 Rankings", "📋 Custom Views"]
+_ADMIN_PAGES = ["🌐 Network", "🔬 Schema Explorer", "🔍 Raw Inspector", "🛠 Admin Panel"]
+_PAGE_IDS = {
+    "🏅 Scoreboard": 1, "📈 Team Trends": 2, "👤 Player Trends": 3, "🏟 Teams": 4,
+    "📰 News": 5, "🏆 Rankings": 6, "🌐 Network": 7, "🔬 Schema Explorer": 8,
+    "🔍 Raw Inspector": 9, "📋 Custom Views": 10, "🛠 Admin Panel": 11,
+    "💚 Support": 12, "🎯 Odds & Lines": 13,
+}
+
+
+def _page_slug(label: str) -> str:
+    return re.sub(r'[^a-z]+', '-', label.lower()).strip('-')
+
+
+@st.cache_resource(show_spinner=False)
+def _get_shared_backend(app_ver: int) -> Dict[str, Any]:
+    _db = SportsDB()
+    _worker = ESPNWorker(_db)
+    _worker.start()
+    return {'db': _db, 'worker': _worker}
+
+
 def main():
     inject_adsense()   # no-op until ADSENSE_CLIENT / ADSENSE_SLOT are filled in
     st.set_page_config(
@@ -5155,20 +5223,17 @@ def main():
     _APP_VER = 8  # bump each time new DB/worker methods are added
 
     def _fresh_init():
-        st.session_state.db = SportsDB()
-        st.session_state.worker = ESPNWorker(st.session_state.db)
-        st.session_state.worker.start()
+        # One DB + background worker per process (not per browser session),
+        # so N visitors don't spawn N threads re-fetching the same ESPN data.
+        _shared = _get_shared_backend(_APP_VER)
+        st.session_state.db = _shared['db']
+        st.session_state.worker = _shared['worker']
         st.session_state._app_ver = _APP_VER
 
     if ('db' not in st.session_state
             or st.session_state.get('_app_ver', 0) < _APP_VER
             or not hasattr(st.session_state.get('db'), 'get_season_games_df')
             or not hasattr(st.session_state.get('worker'), 'fetch_league_leaders')):
-        try:
-            if hasattr(st.session_state.get('worker'), 'running'):
-                st.session_state.worker.running = False
-        except Exception:
-            pass
         _fresh_init()
 
     db: SportsDB = st.session_state.db
@@ -5228,6 +5293,21 @@ def main():
             st.session_state['ui_mode'] = 'mobile' if _ui_mode_now == 'desktop' else 'desktop'
             st.rerun()
 
+
+    # ── NAVIGATION ────────────────────────────────────────────
+    _is_admin = st.session_state.get('admin_authed', False)
+    _nav_opts = _PUBLIC_PAGES + (_ADMIN_PAGES if _is_admin else []) + ['💚 Support']
+    _qp_page = st.query_params.get('page')
+    if 'nav_page' not in st.session_state:
+        st.session_state['nav_page'] = next(
+            (p for p in _nav_opts if _page_slug(p) == _qp_page), _nav_opts[0])
+    if st.session_state['nav_page'] not in _nav_opts:
+        st.session_state['nav_page'] = _nav_opts[0]
+    with st.sidebar:
+        _nav_page = st.radio('Navigate', _nav_opts, key='nav_page',
+                             label_visibility='collapsed')
+        st.divider()
+    st.query_params['page'] = _page_slug(_nav_page)
 
     # ── SIDEBAR ───────────────────────────────────────────────
     with st.sidebar:
@@ -5504,23 +5584,11 @@ def main():
         return False
 
     # ── TABS ──────────────────────────────────────────────────
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs([
-        "🏅 Scoreboard",
-        "📈 Team Trends",
-        "👤 Player Trends",
-        "🏟 Teams",
-        "📰 News",
-        "🏆 Rankings",
-        "🌐 Network",
-        "🔬 Schema Explorer",
-        "🔍 Raw Inspector",
-        "📋 Custom Views",
-        "🛠 Admin Panel",
-        "💚 Support",
-    ])
+    # Only the selected page runs on each rerun (st.tabs executed all 12).
+    _page = _PAGE_IDS.get(_nav_page, 1)
 
     # ── TAB 1: SCOREBOARD ─────────────────────────────────────
-    with tab1:
+    if _page == 1:
         import datetime as _dt1
         active_eps = json.loads(db.get_config('active_endpoints', '[]'))
         _ep1 = active_eps[0] if active_eps else ''
@@ -5740,7 +5808,7 @@ def main():
                             st.divider()
 
     # ── TAB 2: TEAM TRENDS ────────────────────────────────────
-    with tab2:
+    if _page == 2:
         st.subheader("📈 Team Trend Analyzer")
         _render_how_it_works('team_trends')
         _t2_active_eps = json.loads(db.get_config('active_endpoints', '[]'))
@@ -6071,7 +6139,7 @@ def main():
                             )
 
     # ── TAB 3: PLAYER TRENDS ──────────────────────────────────
-    with tab3:
+    if _page == 3:
         import datetime as _dt3
         import json as _jpt
         _pt_cur_yr = _dt3.datetime.now().year
@@ -6550,7 +6618,7 @@ def main():
                 )
 
     # ── TAB 4: TEAMS ──────────────────────────────────────────
-    with tab4:
+    if _page == 4:
         st.subheader("Teams")
         _render_how_it_works('teams')
         active_eps = json.loads(db.get_config('active_endpoints', '[]'))
@@ -6936,7 +7004,7 @@ def main():
                                                 df_roster3['position_group'] == active_grps3[0]])
 
     # ── TAB 5: NEWS ───────────────────────────────────────────
-    with tab5:
+    if _page == 5:
         st.subheader("Latest News")
         _render_how_it_works('news')
         active_eps = json.loads(db.get_config('active_endpoints', '[]'))
@@ -7023,7 +7091,7 @@ def main():
                         st.divider()
 
     # ── TAB 6: RANKINGS & STANDINGS ──────────────────────────
-    with tab6:
+    if _page == 6:
         st.subheader("🏆 Rankings & Standings")
         _render_how_it_works('rankings')
         _r5_all_eps = json.loads(db.get_config('active_endpoints', '[]'))
@@ -7909,7 +7977,7 @@ def main():
                     st.plotly_chart(_rl_fig, use_container_width=True)
 
     # ── TAB 7: NETWORK / COORDINATOR ─────────────────────────
-    with tab7:
+    if _page == 7:
         _render_how_it_works('network')
         if not _render_admin_gate('t6'):
             pass
@@ -8229,7 +8297,7 @@ def main():
                 _mc_cs[_mci].metric(_label, _mv)
 
     # ── TAB 8: SCHEMA EXPLORER ────────────────────────────────
-    with tab8:
+    if _page == 8:
         _render_tab_banner(
             "Schema Explorer & View Builder",
             "Discover every ESPN JSON field · Build custom data views from any stored table",
@@ -9219,7 +9287,7 @@ def main():
                         st.rerun()
 
     # ── TAB 9: RAW INSPECTOR ───────────────────────────────
-    with tab9:
+    if _page == 9:
         if not _render_admin_gate('t8'):
             pass
         else:
@@ -9279,7 +9347,7 @@ def main():
                     st.error(f"Failed to fetch. Error: {worker.last_error}")
 
     # ── TAB 10: CUSTOM VIEWS ────────────────────────────────────
-    with tab10:
+    if _page == 10:
         st.subheader("📋 Custom Views")
         st.caption(
             "Run saved views from this session, from disk, or downloaded from the Admin Panel. "
@@ -9378,7 +9446,7 @@ def main():
                         _cv_run_view(_vcfg)
 
     # ── TAB 11: ADMIN PANEL ───────────────────────────────────
-    with tab11:
+    if _page == 11:
         st.subheader("🛠 Admin Panel")
         st.caption(
             "Upload custom view files to make them available to all users. "
@@ -9664,8 +9732,11 @@ def main():
                             st.rerun()
 
     # ── TAB 12: SUPPORT / DONATE ───────────────────────────────
-    with tab12:
+    if _page == 12:
         _render_donation_page()
+
+    if _page == 13:
+        render_odds_page(db)
 
 
 if __name__ == "__main__":
