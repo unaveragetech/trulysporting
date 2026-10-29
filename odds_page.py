@@ -65,6 +65,8 @@ def fetch_espn_lines(ep_key: str) -> Tuple[pd.DataFrame, str]:
             'home_team': home.get('displayName', ''), 'away_team': away.get('displayName', ''),
             'home_loc': home.get('location', ''), 'away_loc': away.get('location', ''),
             'home_abbr': home.get('abbreviation', ''), 'away_abbr': away.get('abbreviation', ''),
+            'home_id': str(home.get('id', '')), 'away_id': str(away.get('id', '')),
+            'home_logo': home.get('logo', ''), 'away_logo': away.get('logo', ''),
             'espn_book': (odds.get('provider') or {}).get('name', ''),
             'espn_home_ml': close('home', ml), 'espn_away_ml': close('away', ml),
             'espn_spread': close('home', ps, 'line') if ps else _num(odds.get('spread')),
