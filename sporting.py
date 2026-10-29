@@ -2665,11 +2665,17 @@ def _cached_read(fn):
     return wrapper
 
 
+# SQLite allows one writer at a time; serialise writes in-process so parallel
+# fetch threads queue here instead of failing with "database is locked".
+_DB_WRITE_LOCK = threading.RLock()
+
+
 def _invalidating(fn):
     @_functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
         try:
-            return fn(self, *args, **kwargs)
+            with _DB_WRITE_LOCK:
+                return fn(self, *args, **kwargs)
         finally:
             _READ_GEN['n'] += 1
     return wrapper
@@ -3405,7 +3411,8 @@ def _ensure_teams(db: Any, worker: Any, cat: str, spt: str) -> pd.DataFrame:
 
 
 def _ensure_team_boxscores(db: Any, worker: Any, cat: str, spt: str,
-                           team_id: str, season: int, limit: int = 15) -> int:
+                           team_id: str, season: int, limit: Optional[int] = 15,
+                           refresh_schedule: bool = False) -> int:
     """Fetch game summaries (box scores) for a team's most recent completed
     games so player stats exist without visiting the Scoreboard. Once per
     session per team/season. Returns the number of summaries fetched."""
@@ -3414,11 +3421,16 @@ def _ensure_team_boxscores(db: Any, worker: Any, cat: str, spt: str,
         return 0
     st.session_state[flag] = True
     try:
+        if refresh_schedule:
+            # Drop the 1h schedule cache so newly finished games show up.
+            db.save_to_cache(f"{cat}_{spt}_sched_{team_id}_{season}", {})
         worker.fetch_team_schedule(cat, spt, team_id, season)
         sched = db.get_team_schedule_games(cat, spt, team_id, season)
         if sched.empty:
             return 0
-        done = sched[sched['completed']].tail(limit)
+        done = sched[sched['completed']]
+        if limit:
+            done = done.tail(limit)
         missing = [e for e in done['event_id'] if e and not db.get_game_summary(e)]
         if missing:
             from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -5214,11 +5226,14 @@ def main():
             max-width: 100% !important;
         }
 
-        /* ── Mobile: collapse sidebar by default ── */
-        section[data-testid="stSidebar"] {
+        /* ── Mobile: sidebar collapsed until opened (› button, top-left) ── */
+        section[data-testid="stSidebar"][aria-expanded="false"] {
             min-width: 0 !important;
             width: 0 !important;
             transform: translateX(-100%) !important;
+        }
+        section[data-testid="stSidebar"][aria-expanded="true"] {
+            width: 85vw !important; min-width: 85vw !important; z-index: 1000000 !important;
         }
         [data-testid="stSidebarCollapseButton"] { display: flex !important; }
 
@@ -5325,7 +5340,7 @@ def main():
     # ── INITIALISE ────────────────────────────────────────────
     # Use a schema/API version stamp so stale cached objects are always replaced
     # on deploy. Bump _APP_VER whenever new methods are added to SportsDB or ESPNWorker.
-    _APP_VER = 10  # bump each time new DB/worker methods are added
+    _APP_VER = 11  # bump each time new DB/worker methods are added
 
     def _fresh_init():
         # One DB + background worker per process (not per browser session),
@@ -5706,7 +5721,8 @@ def main():
         for _i, _p in enumerate(_more):
             _mc[_i % 2].button(_p, key=f'more_{_i}', use_container_width=True,
                                on_click=_goto, args=(_p,))
-        st.caption('Tip: the bar at the bottom always gets you back to Scores, Games, Odds and Players.')
+        st.caption('Tip: the bar at the bottom always gets you back to Scores, Games, Odds and Players. '
+                   'Leagues & settings live in the side menu — tap **›** at the top-left.')
 
     # ── TAB 1: SCOREBOARD ─────────────────────────────────────
     if _page == 1:
@@ -6348,29 +6364,50 @@ def main():
                         _pt_cat, _pt_spt, _pt_sel_team_id, _pt_team_abbr):
                     _pt_roster_df = db.get_team_roster_players(_pt_sport_key, _pt_sel_team_id)
 
-                _pt_ra, _pt_rb = st.columns([5, 1])
-                with _pt_rb:
-                    _pt_load_roster = st.button(
-                        "🔄 Refresh", key="pt_load_roster",
-                        help="Re-fetch this team's roster and recent box scores from ESPN"
-                    )
+                # Box scores for this team's recent games → player stats.
+                _pt_box_flag = f'auto_box_{_pt_cat}_{_pt_spt}_{_pt_sel_team_id}_{_pt_season}'
+                _pt_new_box = _ensure_team_boxscores(db, worker, _pt_cat, _pt_spt,
+                                                     _pt_sel_team_id, _pt_season)
+
+                # ── Data status + manual loaders ─────────────────
+                _pt_sched = db.get_team_schedule_games(_pt_cat, _pt_spt,
+                                                       _pt_sel_team_id, _pt_season)
+                _pt_done_ids = ([] if _pt_sched.empty else
+                                [e for e in _pt_sched.loc[_pt_sched['completed'], 'event_id'] if e])
+                _pt_have = sum(1 for e in _pt_done_ids if db.get_game_summary(e))
+                with st.container(border=True):
+                    st.markdown(
+                        f"**📦 Box scores:** {_pt_have} of {len(_pt_done_ids)} completed "
+                        f"{_pt_season_lbl} games loaded · roster: {len(_pt_roster_df)} players")
+                    _pt_b1, _pt_b2, _pt_b3 = st.columns(3)
+                    _pt_load_new = _pt_b1.button(
+                        "📥 Get latest games", key="pt_box_latest", use_container_width=True,
+                        help="Download box scores for the team's 15 most recent completed games")
+                    _pt_load_all = _pt_b2.button(
+                        "📚 Load full season", key="pt_box_all", use_container_width=True,
+                        disabled=_pt_have >= len(_pt_done_ids) and bool(_pt_done_ids),
+                        help="Download box scores for every completed game this season")
+                    _pt_load_roster = _pt_b3.button(
+                        "👥 Refresh roster", key="pt_load_roster", use_container_width=True,
+                        help="Re-fetch roster, injuries and headshots from ESPN")
+                if _pt_load_new or _pt_load_all:
+                    st.session_state.pop(_pt_box_flag, None)
+                    _ensure_team_boxscores(db, worker, _pt_cat, _pt_spt, _pt_sel_team_id,
+                                           _pt_season, limit=None if _pt_load_all else 15,
+                                           refresh_schedule=True)
+                    st.session_state['pt_force_profile'] = True
+                    st.rerun()
                 if _pt_load_roster:
                     with st.spinner(f"Fetching roster for {_pt_team_abbr}…"):
                         worker.fetch_team_roster(_pt_cat, _pt_spt,
                                                  _pt_sel_team_id, _pt_team_abbr)
-                    st.session_state.pop(
-                        f'auto_box_{_pt_cat}_{_pt_spt}_{_pt_sel_team_id}_{_pt_season}', None)
                     st.rerun()
-
-                # Box scores for this team's recent games → player stats.
-                _pt_new_box = _ensure_team_boxscores(db, worker, _pt_cat, _pt_spt,
-                                                     _pt_sel_team_id, _pt_season)
 
                 # ── Player selector ──────────────────────────────
                 if _pt_roster_df.empty:
                     st.info(
                         "ESPN returned no roster for this team. "
-                        "Try **🔄 Refresh** above."
+                        "Try **👥 Refresh roster** above."
                     )
                     _pt_sel_player = None
                     _pt_player_id  = None
@@ -6422,7 +6459,8 @@ def main():
                     _pt_profile_cached = db.get_player_profile(
                         _pt_sport_key, str(_pt_player_id), _pt_season
                     )
-                    if _pt_build_btn or _pt_new_box or not _pt_profile_cached:
+                    if (_pt_build_btn or _pt_new_box or not _pt_profile_cached
+                            or st.session_state.pop('pt_force_profile', False)):
                         with st.spinner(f"Caching profile for **{_pt_sel_player}**…"):
                             worker.build_and_cache_player_profile(
                                 _pt_cat, _pt_spt,
