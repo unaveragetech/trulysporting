@@ -1990,7 +1990,7 @@ class SportsDB:
         try:
             return pd.read_sql_query(
                 """SELECT player_name, headshot_url, category,
-                          stat_labels, stat_values, game_date
+                          stat_labels, stat_values, game_date, event_id
                    FROM player_game_stats
                    WHERE sport_key=? AND team_abbr=?
                    ORDER BY player_name, category, game_date DESC""",
@@ -3400,6 +3400,38 @@ def _auto_once(flag: str, label: str, fn, *args, **kwargs) -> bool:
     return True
 
 
+def _auto_fresh(flag: str, ttl: int, label: str, fn, *args, **kwargs) -> bool:
+    """Run an ESPN fetch on page load when it hasn't run in this session for
+    `ttl` seconds. Keeps live data (scores, news, standings) current without
+    any Load/Refresh buttons. Returns True if it ran."""
+    stamps = st.session_state.setdefault('_fresh_ts', {})
+    if time.time() - stamps.get(flag, 0) < ttl:
+        return False
+    stamps[flag] = time.time()
+    with st.spinner(label):
+        try:
+            fn(*args, **kwargs)
+        except Exception as e:
+            stamps.pop(flag, None)
+            st.warning(f"Auto-load failed: {e}")
+    return True
+
+
+def _prefetch_summaries(db: Any, worker: Any, cat: str, spt: str, event_ids: List[str]) -> int:
+    """Download missing game summaries (box score, PBP, injuries…) 4 at a time."""
+    missing = [e for e in event_ids if e and not db.get_game_summary(str(e))]
+    if not missing:
+        return 0
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    bar = st.progress(0.0, text=f"Loading {len(missing)} box score(s) from ESPN…")
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futs = [pool.submit(worker.fetch_game_summary, cat, spt, str(e)) for e in missing]
+        for i, _ in enumerate(as_completed(futs), 1):
+            bar.progress(i / len(missing), text=f"Loading box scores… {i}/{len(missing)}")
+    bar.empty()
+    return len(missing)
+
+
 def _ensure_teams(db: Any, worker: Any, cat: str, spt: str) -> pd.DataFrame:
     """Teams for a league, fetched from ESPN automatically if none are stored."""
     df = db.get_teams_df(f'{cat}/{spt}')
@@ -3411,19 +3443,18 @@ def _ensure_teams(db: Any, worker: Any, cat: str, spt: str) -> pd.DataFrame:
 
 
 def _ensure_team_boxscores(db: Any, worker: Any, cat: str, spt: str,
-                           team_id: str, season: int, limit: Optional[int] = 15,
-                           refresh_schedule: bool = False) -> int:
-    """Fetch game summaries (box scores) for a team's most recent completed
-    games so player stats exist without visiting the Scoreboard. Once per
-    session per team/season. Returns the number of summaries fetched."""
+                           team_id: str, season: int, limit: Optional[int] = None,
+                           ttl: int = 900) -> int:
+    """Fetch box scores for every completed game of a team's season (or the
+    last `limit`) so player stats exist with no buttons. Re-checks the
+    schedule every `ttl` seconds to pick up newly finished games.
+    Returns the number of summaries fetched."""
+    stamps = st.session_state.setdefault('_fresh_ts', {})
     flag = f'auto_box_{cat}_{spt}_{team_id}_{season}'
-    if st.session_state.get(flag):
+    if time.time() - stamps.get(flag, 0) < ttl:
         return 0
-    st.session_state[flag] = True
+    stamps[flag] = time.time()
     try:
-        if refresh_schedule:
-            # Drop the 1h schedule cache so newly finished games show up.
-            db.save_to_cache(f"{cat}_{spt}_sched_{team_id}_{season}", {})
         worker.fetch_team_schedule(cat, spt, team_id, season)
         sched = db.get_team_schedule_games(cat, spt, team_id, season)
         if sched.empty:
@@ -3431,19 +3462,11 @@ def _ensure_team_boxscores(db: Any, worker: Any, cat: str, spt: str,
         done = sched[sched['completed']]
         if limit:
             done = done.tail(limit)
-        missing = [e for e in done['event_id'] if e and not db.get_game_summary(e)]
-        if missing:
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-            bar = st.progress(0.0, text=f"Loading {len(missing)} box score(s) from ESPN…")
-            with ThreadPoolExecutor(max_workers=4) as pool:
-                futs = [pool.submit(worker.fetch_game_summary, cat, spt, e) for e in missing]
-                for i, _ in enumerate(as_completed(futs), 1):
-                    bar.progress(i / len(missing), text=f"Loading box scores… {i}/{len(missing)}")
-            bar.empty()
+        n = _prefetch_summaries(db, worker, cat, spt, list(done['event_id']))
         db.repopulate_player_game_stats()
-        return len(missing)
+        return n
     except Exception as e:
-        st.session_state.pop(flag, None)  # retry on next rerun
+        stamps.pop(flag, None)  # retry on next rerun
         st.warning(f"Couldn't load box scores automatically: {e}")
         return 0
 
@@ -4097,32 +4120,16 @@ def render_game_card(game: Any, db: Any = None, worker: Any = None, category: st
     home_abbr_game = str(game.get('home_abbr') or game.get('home_team', 'HOME'))
     away_abbr_game = str(game.get('away_abbr') or game.get('away_team', 'AWAY'))
 
-    # ── Fetch Summary button (shows if no summary stored yet) ──
+    # ── Summary (box score, injuries, odds…) loads automatically ──
     has_summary = bool(db.get_game_summary(event_id))
-    if not has_summary:
-        col_fs, col_fi = st.columns([1, 4])
-        with col_fs:
-            if st.button("📥 Fetch Summary", key=f"gs_fetch_{event_id}"):
-                if worker and category and sport:
-                    with st.spinner("Fetching game summary…"):
-                        worker.fetch_game_summary(category, sport, event_id)
-                    st.rerun()
-        with col_fi:
-            st.caption("Loads full box score, player stats, injuries, betting data & more.")
-    else:
-        # Offer a re-fetch button (small, right-aligned via columns)
-        _, col_refetch = st.columns([5, 1])
-        with col_refetch:
-            if st.button("🔄 Refresh", key=f"gs_refetch_{event_id}", help="Re-fetch game summary"):
-                if worker and category and sport:
-                    with st.spinner("Re-fetching…"):
-                        worker.fetch_game_summary(category, sport, event_id)
-                    st.rerun()
+    if not has_summary and (is_final or is_live) and worker and category and sport:
+        worker.fetch_game_summary(category, sport, event_id)
+        has_summary = bool(db.get_game_summary(event_id))
 
     # ── Game Detail expander ────────────────────────────────────
     with st.expander("📊 Game Detail  (Box Score · Players · Win Prob · Betting · Injuries)", expanded=False):
         if not has_summary:
-            st.info("Click **Fetch Summary** above to load game detail.")
+            st.info("Game detail appears once the game starts.")
         else:
             render_game_detail(event_id, db, home_abbr_game, away_abbr_game)
 
@@ -4139,21 +4146,11 @@ def render_game_card(game: Any, db: Any = None, worker: Any = None, category: st
     with st.expander(f"{pbp_icon} Play-by-Play", expanded=False):
         already_fetched = db.has_pbp(event_id)
 
+        if not already_fetched and worker and category and sport:
+            worker.fetch_game_summary(category, sport, event_id)
+            already_fetched = db.has_pbp(event_id)
         if not already_fetched:
-            col_btn, col_info = st.columns([1, 3])
-            with col_btn:
-                if st.button("Fetch PBP", key=f"pbp_fetch_{event_id}"):
-                    if worker and category and sport:
-                        with st.spinner("Fetching play-by-play data…"):
-                            worker.fetch_game_summary(category, sport, event_id)
-                        st.rerun()
-                    else:
-                        st.error("Worker not available.")
-            with col_info:
-                if is_football:
-                    st.caption("Pulls full drive-by-drive data from ESPN for this game.")
-                else:
-                    st.caption("Pulls play-by-play data from ESPN for this game.")
+            st.info("Play-by-play isn't available for this game yet.")
             return
 
         # ── Load stored plays ──────────────────────────────────
@@ -5036,7 +5033,7 @@ def _page_slug(label: str) -> str:
 
 
 @st.cache_resource(show_spinner=False)
-def _get_shared_backend(app_ver: int) -> Dict[str, Any]:
+def _get_shared_backend(app_ver: int, src_mtime: float = 0.0) -> Dict[str, Any]:
     _db = SportsDB()
     _worker = ESPNWorker(_db)
     _worker.start()
@@ -5340,21 +5337,19 @@ def main():
     # ── INITIALISE ────────────────────────────────────────────
     # Use a schema/API version stamp so stale cached objects are always replaced
     # on deploy. Bump _APP_VER whenever new methods are added to SportsDB or ESPNWorker.
-    _APP_VER = 11  # bump each time new DB/worker methods are added
+    _APP_VER = 12  # bump each time new DB/worker methods are added
 
     def _fresh_init():
         # One DB + background worker per process (not per browser session),
         # so N visitors don't spawn N threads re-fetching the same ESPN data.
-        _shared = _get_shared_backend(_APP_VER)
+        # Key on source mtime too, so a code change (deploy or dev reload) never
+        # keeps serving a DB object built from the old class definition.
+        _shared = _get_shared_backend(_APP_VER, os.path.getmtime(__file__))
         st.session_state.db = _shared['db']
         st.session_state.worker = _shared['worker']
         st.session_state._app_ver = _APP_VER
 
-    if ('db' not in st.session_state
-            or st.session_state.get('_app_ver', 0) < _APP_VER
-            or not hasattr(st.session_state.get('db'), 'get_season_games_df')
-            or not hasattr(st.session_state.get('worker'), 'fetch_league_leaders')):
-        _fresh_init()
+    _fresh_init()  # cheap: returns the cached shared backend
 
     db: SportsDB = st.session_state.db
     worker: ESPNWorker = st.session_state.worker
@@ -5545,11 +5540,11 @@ def main():
             'icon': '👤',
             'summary': 'Drill into per-player boxscore stats, game logs, and play-by-play mentions.',
             'steps': [
-                ('1 — Pick league, team & player', 'Teams, the roster, and box scores for '
-                 'the team\'s last 15 completed games load from ESPN automatically the first '
-                 'time you pick them.'),
-                ('2 — Refresh', 'Click **🔄 Refresh** to re-pull the roster and box scores. '
-                 '**⚙ Rebuild** re-aggregates the player profile from stored data.'),
+                ('1 — Pick league, team & player', 'Teams, the roster, and box scores load '
+                 'from ESPN automatically.'),
+                ('2 — Always current', 'Box scores for every completed game this season load '
+                 'by themselves and re-check for new games every 15 minutes. Players who have '
+                 'played are listed first.'),
                 ('PBP fallback', 'If no boxscore stats exist, the app auto-derives estimates '
                  'from play-by-play text (abbreviated names like *S.Darnold*).'),
             ],
@@ -5560,11 +5555,10 @@ def main():
             'steps': [
                 ('1 — Add a league', 'Add leagues via the sidebar first.'),
                 ('2 — Teams load automatically', 'The first visit to a league fetches all '
-                 'teams from ESPN and caches them. **Load Teams** re-fetches.'),
-                ('3 — Load Detail',  'Click any team row to expand it, then **Load Detail** '
-                 'for venue, coaching staff, and season record.'),
-                ('Why are no teams listed?', 'ESPN may not publish teams for this league. '
-                 'Click **Load Teams** to retry.'),
+                 'teams, then each team\'s detail and roster when you pick it.'),
+                ('3 — Pick a team',  'Venue, coaching staff, record and roster load '
+                 'automatically.'),
+                ('Why are no teams listed?', 'ESPN may not publish teams for this league.'),
             ],
         },
         'news': {
@@ -5773,53 +5767,24 @@ def main():
                     label_visibility="collapsed"
                 )
 
-            # ── Auto-fetch on first visit to this league/season ─
-            _sb_auto_key = f'sb_auto_{cat}_{sport}_{sb_season}'
-            if not st.session_state.get(_sb_auto_key):
-                st.session_state[_sb_auto_key] = True
-                with st.spinner("Loading current schedule from ESPN…"):
-                    worker.fetch_and_process(cat, sport, 'scoreboard', force_refresh=True)
-                    _today8 = _dt1.datetime.now().strftime('%Y%m%d')
-                    worker.fetch_date_scoreboard(cat, sport, _today8)
-
-            # ── Load full season expander ────────────────────────
-            with st.expander("📅 Load / Refresh Season Data", expanded=False):
-                _lfs_c1, _lfs_c2 = st.columns([2, 1])
-                with _lfs_c1:
-                    st.caption(
-                        f"Fetches every week / month of the **{_sb_season_lbl}** {sel_ep} season "
-                        f"from ESPN in one pass. This may take 20–60 seconds depending on "
-                        f"sport. Run once — results are cached."
-                    )
-                with _lfs_c2:
-                    _sb_full_btn = st.button(f"📥 Load Full {_sb_season_lbl} Season",
-                                             key="sb_full_season", type="primary")
-
-                _sb_date_c1, _sb_date_c2 = st.columns([2, 1])
-                with _sb_date_c1:
-                    _sb_jump_date = st.date_input(
-                        "Fetch a specific date", value=_dt1.datetime.now().date(),
-                        key="sb_date_jump")
-                with _sb_date_c2:
-                    st.write("")
-                    _sb_date_btn = st.button("📡 Fetch Date", key="sb_fetch_date")
-
-                if _sb_date_btn:
-                    with st.spinner(f"Fetching {_sb_jump_date}…"):
-                        worker.fetch_date_scoreboard(cat, sport,
-                                                     _sb_jump_date.strftime('%Y%m%d'))
-                    st.rerun()
-
-                if _sb_full_btn:
-                    _chunks = ESPNWorker._season_date_ranges(cat, sport, sb_season)
-                    _prog   = st.progress(0, text="Starting…")
-                    for _ci, (_lbl, _prms) in enumerate(_chunks):
-                        _prog.progress((_ci + 1) / len(_chunks),
-                                       text=f"Fetching {_lbl} ({_ci+1}/{len(_chunks)})…")
-                        worker.fetch_and_process(cat, sport, 'scoreboard',
-                                                 force_refresh=True, params=_prms)
-                    _prog.progress(1.0, text="✅ Season loaded!")
-                    st.rerun()
+            # ── Auto-load: whole season (once / 12h), current slate (every 2 min) ─
+            _sb_full_key = f'season_loaded_{cat}_{sport}_{sb_season}'
+            _sb_full_ts = float(db.get_config(_sb_full_key, '0') or 0)
+            if time.time() - _sb_full_ts > 12 * 3600:
+                _chunks = ESPNWorker._season_date_ranges(cat, sport, sb_season)
+                _prog = st.progress(0, text=f"Loading the {_sb_season_lbl} season…")
+                for _ci, (_lbl, _prms) in enumerate(_chunks):
+                    _prog.progress((_ci + 1) / len(_chunks),
+                                   text=f"Loading {_lbl} ({_ci + 1}/{len(_chunks)})…")
+                    worker.fetch_and_process(cat, sport, 'scoreboard',
+                                             force_refresh=True, params=_prms)
+                _prog.empty()
+                db.update_config(_sb_full_key, str(time.time()))
+            _auto_fresh(f'sb_live_{cat}_{sport}', 120, "Updating scores…",
+                        lambda: (worker.fetch_and_process(cat, sport, 'scoreboard',
+                                                          force_refresh=True),
+                                 worker.fetch_date_scoreboard(
+                                     cat, sport, _dt1.datetime.now().strftime('%Y%m%d'))))
 
             # ── Query DB for all season games ────────────────────
             df_games = db.get_season_games_df(cat, sport, sb_season)
@@ -5938,6 +5903,12 @@ def main():
                                     st.rerun()
 
                             if st.session_state[_tog_key]:
+                                # Box scores for this date's finished games, in parallel.
+                                if 'event_id' in _d_games.columns:
+                                    _fin_ids = [str(e) for e, stt in zip(_d_games['event_id'],
+                                                                        _d_games['status'])
+                                                if 'FINAL' in str(stt).upper()]
+                                    _prefetch_summaries(db, worker, cat, sport, _fin_ids)
                                 for _, _g in _d_games.iterrows():
                                     render_game_card(_g, db=db, worker=worker,
                                                      category=cat, sport=sport)
@@ -6001,27 +5972,11 @@ def main():
                 )
                 _t2_season_lbl = ESPNWorker._season_label(_t2_cat, _t2_season)
 
-            with _t2c4:
-                st.write("")
-                _t2_fetch = st.button("🔄 Load", key="trend_load",
-                                      help="Fetch team season schedule from ESPN")
-
-            if _t2_sel_tid and _t2_fetch:
-                with st.spinner("Fetching schedule…"):
-                    worker.fetch_team_schedule(_t2_cat, _t2_spt,
-                                               _t2_sel_tid, _t2_season)
-
-            # ── Auto-load schedule on first team+season visit ───
+            # ── Auto-load schedule (worker caches it for 1h) ────
             if _t2_sel_tid:
-                _t2_auto_key = f'sched_auto_{_t2_sel_tid}_{_t2_season}'
-                if not st.session_state.get(_t2_auto_key):
-                    st.session_state[_t2_auto_key] = True
-                    _t2_precheck = db.get_team_schedule_games(
-                        _t2_cat, _t2_spt, _t2_sel_tid, _t2_season)
-                    if _t2_precheck.empty:
-                        with st.spinner("Loading schedule…"):
-                            worker.fetch_team_schedule(_t2_cat, _t2_spt,
-                                                       _t2_sel_tid, _t2_season)
+                _auto_fresh(f'sched_{_t2_ep}_{_t2_sel_tid}_{_t2_season}', 900,
+                            "Loading schedule…", worker.fetch_team_schedule,
+                            _t2_cat, _t2_spt, _t2_sel_tid, _t2_season)
 
             # ── Load and parse schedule ─────────────────────────
             if _t2_sel_tid:
@@ -6358,68 +6313,50 @@ def main():
                     _pt_team_abbr = _pt_tr.iloc[0]['team_abbr'] if not _pt_tr.empty else ''
 
                 _pt_roster_df = db.get_team_roster_players(_pt_sport_key, _pt_sel_team_id)
-                if _pt_roster_df.empty and _auto_once(
-                        f'auto_roster_{_pt_sport_key}_{_pt_sel_team_id}',
-                        'Loading roster from ESPN…', worker.fetch_team_roster,
-                        _pt_cat, _pt_spt, _pt_sel_team_id, _pt_team_abbr):
+                # Roster (injuries change daily): load if missing, refresh every 6h.
+                if _auto_fresh(f'roster_{_pt_sport_key}_{_pt_sel_team_id}',
+                               0 if _pt_roster_df.empty else 6 * 3600,
+                               'Loading roster from ESPN…', worker.fetch_team_roster,
+                               _pt_cat, _pt_spt, _pt_sel_team_id, _pt_team_abbr):
                     _pt_roster_df = db.get_team_roster_players(_pt_sport_key, _pt_sel_team_id)
 
                 # Box scores for this team's recent games → player stats.
-                _pt_box_flag = f'auto_box_{_pt_cat}_{_pt_spt}_{_pt_sel_team_id}_{_pt_season}'
                 _pt_new_box = _ensure_team_boxscores(db, worker, _pt_cat, _pt_spt,
                                                      _pt_sel_team_id, _pt_season)
 
-                # ── Data status + manual loaders ─────────────────
+                # ── Data status (everything above loads by itself) ─
                 _pt_sched = db.get_team_schedule_games(_pt_cat, _pt_spt,
                                                        _pt_sel_team_id, _pt_season)
                 _pt_done_ids = ([] if _pt_sched.empty else
                                 [e for e in _pt_sched.loc[_pt_sched['completed'], 'event_id'] if e])
                 _pt_have = sum(1 for e in _pt_done_ids if db.get_game_summary(e))
-                with st.container(border=True):
-                    st.markdown(
-                        f"**📦 Box scores:** {_pt_have} of {len(_pt_done_ids)} completed "
-                        f"{_pt_season_lbl} games loaded · roster: {len(_pt_roster_df)} players")
-                    _pt_b1, _pt_b2, _pt_b3 = st.columns(3)
-                    _pt_load_new = _pt_b1.button(
-                        "📥 Get latest games", key="pt_box_latest", use_container_width=True,
-                        help="Download box scores for the team's 15 most recent completed games")
-                    _pt_load_all = _pt_b2.button(
-                        "📚 Load full season", key="pt_box_all", use_container_width=True,
-                        disabled=_pt_have >= len(_pt_done_ids) and bool(_pt_done_ids),
-                        help="Download box scores for every completed game this season")
-                    _pt_load_roster = _pt_b3.button(
-                        "👥 Refresh roster", key="pt_load_roster", use_container_width=True,
-                        help="Re-fetch roster, injuries and headshots from ESPN")
-                if _pt_load_new or _pt_load_all:
-                    st.session_state.pop(_pt_box_flag, None)
-                    _ensure_team_boxscores(db, worker, _pt_cat, _pt_spt, _pt_sel_team_id,
-                                           _pt_season, limit=None if _pt_load_all else 15,
-                                           refresh_schedule=True)
-                    st.session_state['pt_force_profile'] = True
-                    st.rerun()
-                if _pt_load_roster:
-                    with st.spinner(f"Fetching roster for {_pt_team_abbr}…"):
-                        worker.fetch_team_roster(_pt_cat, _pt_spt,
-                                                 _pt_sel_team_id, _pt_team_abbr)
-                    st.rerun()
+                st.caption(
+                    f"📦 {_pt_have} of {len(_pt_done_ids)} completed {_pt_season_lbl} games "
+                    f"loaded · {len(_pt_roster_df)} players · updates automatically")
 
                 # ── Player selector ──────────────────────────────
                 if _pt_roster_df.empty:
                     st.info(
-                        "ESPN returned no roster for this team. "
-                        "Try **👥 Refresh roster** above."
+                        "ESPN returned no roster for this team."
                     )
                     _pt_sel_player = None
                     _pt_player_id  = None
                 else:
-                    # Sort by position group, show jersey + name
+                    # Players with box scores first (most games), then the rest.
+                    _pt_tps = db.get_team_players_stats(_pt_sport_key, _pt_team_abbr)
+                    _pt_gp = ({} if _pt_tps.empty else
+                              _pt_tps.groupby('player_name')['event_id'].nunique().to_dict())
+                    _pt_roster_sorted = _pt_roster_df.assign(
+                        _gp=_pt_roster_df['display_name'].map(_pt_gp).fillna(0)
+                    ).sort_values('_gp', ascending=False, kind='stable')
                     _pt_player_opts = {
                         str(r['player_id']): (
-                            f"#{r['jersey']}  {r['display_name']}"
-                            f"  — {r['position']}"
+                            f"{r['display_name']}  — {r['position']}"
+                            + (f"  #{r['jersey']}" if r['jersey'] else '')
+                            + (f"  · {int(r['_gp'])} games" if r['_gp'] else "  · no games yet")
                             + (f"  ⚠ {r['injury_status']}" if r.get('injury_status') else '')
                         )
-                        for _, r in _pt_roster_df.iterrows()
+                        for _, r in _pt_roster_sorted.iterrows()
                         if r['display_name']
                     }
                     _pt_player_key = f'pt_player_{_pt_sport_key}_{_pt_sel_team_id}'
@@ -6440,12 +6377,7 @@ def main():
                     _pt_sel_player = _pt_player_row.iloc[0]['display_name'] \
                         if not _pt_player_row.empty else ''
 
-                    with _pt_player_col2:
-                        st.write("")
-                        _pt_build_btn = st.button(
-                            "⚙ Rebuild", key="pt_build_profile",
-                            help="Re-aggregate boxscore + PBP data for this player"
-                        )
+                    _pt_build_btn = False
 
                     # ── Load local DB data immediately — no ESPN API needed ─
                     _pgs_live  = db.get_player_game_log(
@@ -6459,8 +6391,7 @@ def main():
                     _pt_profile_cached = db.get_player_profile(
                         _pt_sport_key, str(_pt_player_id), _pt_season
                     )
-                    if (_pt_build_btn or _pt_new_box or not _pt_profile_cached
-                            or st.session_state.pop('pt_force_profile', False)):
+                    if _pt_new_box or not _pt_profile_cached:
                         with st.spinner(f"Caching profile for **{_pt_sel_player}**…"):
                             worker.build_and_cache_player_profile(
                                 _pt_cat, _pt_spt,
@@ -6767,49 +6698,7 @@ def main():
         if not active_eps:
             st.info("Add leagues in the sidebar.")
         else:
-            # ── Top action bar ─────────────────────────────────
-            t3_c1, t3_c2, t3_c3, t3_c4 = st.columns([3, 1, 1, 1])
-            with t3_c1:
-                sel_ep3 = st.selectbox("League", active_eps, key="teams_ep")
-            with t3_c2:
-                st.write("")
-                if st.button("🔄 Load Teams"):
-                    cat3, spt3 = sel_ep3.split('/')
-                    with st.spinner("Fetching teams…"):
-                        worker.fetch_and_process(cat3, spt3, 'teams', force_refresh=True)
-                    st.rerun()
-            with t3_c3:
-                st.write("")
-                if st.button("📋 All Rosters", help="Fetch rosters for every team in this league"):
-                    cat3, spt3 = sel_ep3.split('/')
-                    df_t_bulk = db.get_teams_df(sel_ep3)
-                    if not df_t_bulk.empty:
-                        prog3 = st.progress(0, text="Fetching rosters…")
-                        total3 = len(df_t_bulk)
-                        for idx3, (_, tr3) in enumerate(df_t_bulk.iterrows()):
-                            prog3.progress(idx3 / total3,
-                                           text=f"Fetching {tr3['team_abbr']} ({idx3+1}/{total3})…")
-                            worker.fetch_team_roster(cat3, spt3,
-                                                     str(tr3['team_id']), tr3['team_abbr'])
-                        prog3.progress(1.0, text=f"Done — {total3} rosters fetched!")
-                    st.rerun()
-            with t3_c4:
-                st.write("")
-                if st.button("📑 All Details", help="Fetch detail for every team in this league"):
-                    cat3, spt3 = sel_ep3.split('/')
-                    df_t_bulk2 = db.get_teams_df(sel_ep3)
-                    if not df_t_bulk2.empty:
-                        prog3b = st.progress(0, text="Fetching details…")
-                        total3b = len(df_t_bulk2)
-                        for idx3b, (_, tr3b) in enumerate(df_t_bulk2.iterrows()):
-                            prog3b.progress(idx3b / total3b,
-                                            text=f"Fetching {tr3b['team_abbr']} ({idx3b+1}/{total3b})…")
-                            worker.fetch_team_detail(cat3, spt3,
-                                                     str(tr3b['team_id']),
-                                                     tr3b.get('team_slug', ''))
-                        prog3b.progress(1.0, text=f"Done — {total3b} details fetched!")
-                    st.rerun()
-
+            sel_ep3 = st.selectbox("League", active_eps, key="teams_ep")
             cat3, spt3 = sel_ep3.split('/')
             df_teams   = db.get_teams_df(sel_ep3)
             df_detail3 = db.get_team_detail_df(sel_ep3)
@@ -6824,7 +6713,7 @@ def main():
                 df_detail3 = db.get_team_detail_df(sel_ep3)
 
             if df_teams.empty:
-                st.info("No teams loaded yet — click **🔄 Load Teams** above.")
+                st.info("ESPN returned no teams for this league.")
             else:
                 # ── Two-column layout: list | detail ──────────────
                 left3, right3 = st.columns([1, 3], gap="medium")
@@ -6936,24 +6825,6 @@ def main():
                                 with st.spinner(f"Loading {team_abbr3} roster…"):
                                     worker.fetch_team_roster(cat3, spt3,
                                                              sel_tid3, team_abbr3)
-
-                            # ── Action buttons row ─────────────────
-                            ra1, ra2, ra3 = st.columns([1, 1, 3])
-                            with ra1:
-                                if st.button("🔄 Refresh Detail", key="t3_load_det"):
-                                    with st.spinner(f"Fetching {team_abbr3} detail…"):
-                                        worker.fetch_team_detail(cat3, spt3,
-                                                                  sel_tid3, team_slug3)
-                                    df_detail3 = db.get_team_detail_df(sel_ep3)
-                                    st.session_state[_det_auto_key] = True
-                                    st.rerun()
-                            with ra2:
-                                if st.button("🔄 Refresh Roster", key="t3_load_ros"):
-                                    with st.spinner(f"Fetching {team_abbr3} roster…"):
-                                        worker.fetch_team_roster(cat3, spt3,
-                                                                  sel_tid3, team_abbr3)
-                                    st.session_state[_ros_auto_key] = True
-                                    st.rerun()
 
                             # ── Detail panel ───────────────────────
                             det3 = detail_map3.get(sel_tid3)
@@ -7153,22 +7024,20 @@ def main():
         if not active_eps:
             st.info("Add leagues in the sidebar.")
         else:
-            col_ep4, col_lim, col_btn4 = st.columns([3, 1, 1])
+            col_ep4, col_lim = st.columns([3, 1])
             with col_ep4:
                 sel_ep4 = st.selectbox("League", active_eps, key="news_ep")
             with col_lim:
                 news_limit = st.number_input("Articles", value=20, min_value=5, max_value=100, step=5)
-            with col_btn4:
-                st.write("")
-                if st.button("Refresh News"):
-                    cat, sport = sel_ep4.split('/')
-                    with st.spinner("Fetching news…"):
-                        worker.fetch_and_process(cat, sport, 'news', force_refresh=True)
+            _n_cat, _n_spt = sel_ep4.split('/')
+            _auto_fresh(f'news_{sel_ep4}', 600, "Loading headlines…",
+                        worker.fetch_and_process, _n_cat, _n_spt, 'news',
+                        force_refresh=True)
 
             df_news = db.get_news_df(sel_ep4, limit=int(news_limit))
 
             if df_news.empty:
-                st.info("No news yet. Click 'Refresh News'.")
+                st.info("ESPN has no headlines for this league right now.")
             else:
                 news_raw = st.toggle("📋 View Raw Table", key='news_raw_toggle')
                 if news_raw:
@@ -7296,40 +7165,15 @@ def main():
             _r5_cat, _r5_spt = _r5_ep.split('/', 1)
             _r5_has_polls = bool(EndpointRegistry.get_url(_r5_cat, _r5_spt, 'rankings'))
 
-            with _r5_hdr2:
-                st.write("")
-                if _r5_has_polls:
-                    if st.button("🔄 Rankings", key="r5_load_rank"):
-                        with st.spinner("Fetching rankings…"):
-                            worker.fetch_and_process(
-                                _r5_cat, _r5_spt, 'rankings', force_refresh=True)
-                        st.rerun()
-            with _r5_hdr3:
-                st.write("")
-                if st.button("🔄 Standings", key="r5_load_stand"):
-                    with st.spinner("Fetching standings…"):
-                        worker.fetch_standings(_r5_cat, _r5_spt)
-                    st.rerun()
-            with _r5_hdr4:
-                st.write("")
-                if st.button("🔄 Both", key="r5_load_both"):
-                    with st.spinner("Fetching all data…"):
-                        if _r5_has_polls:
-                            worker.fetch_and_process(
-                                _r5_cat, _r5_spt, 'rankings', force_refresh=True)
-                        worker.fetch_standings(_r5_cat, _r5_spt)
-                    st.rerun()
-
             # ══════════════════════════════════════════════════
             # SECTION A — POLL RANKINGS  (college leagues only)
             # ══════════════════════════════════════════════════
             if _r5_has_polls:
                 st.markdown("### 📊 Poll Rankings")
                 _r5_df = db.get_rankings_df(_r5_ep)
-                if _r5_df.empty and _auto_once(
-                        f'auto_rank_{_r5_ep}', 'Loading rankings from ESPN…',
-                        worker.fetch_and_process, _r5_cat, _r5_spt, 'rankings',
-                        force_refresh=True):
+                if _auto_fresh(f'rank_{_r5_ep}', 3600, 'Loading rankings from ESPN…',
+                               worker.fetch_and_process, _r5_cat, _r5_spt, 'rankings',
+                               force_refresh=True):
                     _r5_df = db.get_rankings_df(_r5_ep)
 
                 if _r5_df.empty:
@@ -7472,18 +7316,17 @@ def main():
                                     margin=dict(t=55, b=80, l=50, r=10),
                                 ))
                                 st.plotly_chart(_r5_hfig, use_container_width=True)
-                                st.caption(f"{_r5_hist['snapshot_date'].nunique()} snapshots · Each 🔄 Rankings load adds a new data point.")
+                                st.caption(f"{_r5_hist['snapshot_date'].nunique()} snapshots · a new one is saved each day.")
                             elif not _r5_hist.empty:
-                                st.caption("📅 Load on multiple days to build the rank-movement chart.")
+                                st.caption("📅 The rank-movement chart builds up as rankings are saved each day.")
 
             # ══════════════════════════════════════════════════
             # SECTION B — STANDINGS (all leagues)
             # ══════════════════════════════════════════════════
             st.markdown("### 📋 Standings")
             _r5s_df = db.get_standings_df(_r5_cat, _r5_spt)
-            if _r5s_df.empty and _auto_once(
-                    f'auto_stand_{_r5_ep}', 'Loading standings from ESPN…',
-                    worker.fetch_standings, _r5_cat, _r5_spt):
+            if _auto_fresh(f'stand_{_r5_ep}', 3600, 'Loading standings from ESPN…',
+                           worker.fetch_standings, _r5_cat, _r5_spt):
                 _r5s_df = db.get_standings_df(_r5_cat, _r5_spt)
 
             if _r5s_df.empty:
@@ -7688,13 +7531,6 @@ def main():
                         format_func=lambda y, _c=_r5_cat: ESPNWorker._season_label(_c, y)
                     )
                 _r5c_season_lbl = ESPNWorker._season_label(_r5_cat, _r5c_season)
-                with _r5c_c3:
-                    st.write("")
-                    if st.button("🔄 Load Schedule", key="r5c_load"):
-                        with st.spinner("Fetching schedule…"):
-                            worker.fetch_team_schedule(
-                                _r5_cat, _r5_spt, _r5c_sel_id, _r5c_season)
-                        st.rerun()
 
                 _r5c_row   = _r5c_teams_df[_r5c_teams_df['team_id'].astype(str) == str(_r5c_sel_id)]
                 _r5c_abbr  = _r5c_row.iloc[0]['team_abbr']  if not _r5c_row.empty else _r5c_sel_id
@@ -7705,10 +7541,9 @@ def main():
 
                 _r5c_sched = db.get_team_schedule_games(
                     _r5_cat, _r5_spt, _r5c_sel_id, _r5c_season)
-                if _r5c_sched.empty and _auto_once(
-                        f'auto_sched_{_r5_ep}_{_r5c_sel_id}_{_r5c_season}',
-                        'Loading schedule from ESPN…', worker.fetch_team_schedule,
-                        _r5_cat, _r5_spt, _r5c_sel_id, _r5c_season):
+                if _auto_fresh(f'sched_{_r5_ep}_{_r5c_sel_id}_{_r5c_season}', 900,
+                               'Loading schedule from ESPN…', worker.fetch_team_schedule,
+                               _r5_cat, _r5_spt, _r5c_sel_id, _r5c_season):
                     _r5c_sched = db.get_team_schedule_games(
                         _r5_cat, _r5_spt, _r5c_sel_id, _r5c_season)
                 _r5c_done = (

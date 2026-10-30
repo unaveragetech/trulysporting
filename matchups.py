@@ -98,7 +98,7 @@ def _player_table(db: Any, sport_key: str, team_abbr: str) -> pd.DataFrame:
                 num = float(str(v).replace(',', ''))
             except ValueError:
                 continue
-            rows.append((r.player_name, r.category or 'stats', lab, num, r.game_date))
+            rows.append((r.player_name, r.category or 'stats', lab, num, r.event_id))
     df = pd.DataFrame(rows, columns=['player', 'category', 'stat', 'value', 'game_date'])
     if df.empty:
         return df
