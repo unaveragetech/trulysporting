@@ -188,12 +188,8 @@ def render_odds_page(db) -> None:
     active = json.loads(db.get_config('active_endpoints', '[]'))
     supported = set(ODDS_SPORT_MAP) | set(KALSHI_SERIES)
     leagues = [k for k in active if k in supported] or sorted(supported)
-    c1, c2 = st.columns([3, 1])
-    ep_key = c1.selectbox('League', leagues, key='fd_league')
-    if c2.button('🔄 Refresh lines', use_container_width=True):
-        fetch_fanduel_odds.clear()
-        fetch_espn_lines.clear()
-        fetch_kalshi_markets.clear()
+    # Lines refresh on their own: ESPN/FanDuel every 5 min, Kalshi every 2 min.
+    ep_key = st.selectbox('League', leagues, key='fd_league')
 
     games, err = fetch_espn_lines(ep_key)
     if err:
