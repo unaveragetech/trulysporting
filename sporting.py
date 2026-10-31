@@ -1931,9 +1931,13 @@ class SportsDB:
                 FROM player_game_stats p
                 LEFT JOIN game_history h ON h.event_id = p.event_id
                 WHERE p.sport_key=?
-                  AND (p.player_id=? OR LOWER(p.player_name) LIKE ?)
+                  AND (p.player_id=?
+                       OR (substr(p.player_id, 1, 4) = '_pn_'
+                           AND LOWER(p.player_name) = ?))
                 ORDER BY p.game_date DESC
-            """, conn, params=(sport_key, str(player_id), f'%{player_name.lower()}%'))
+            """, conn, params=(sport_key, str(player_id), player_name.lower()))
+            # One row per game & category (an ID'd row wins over a name-only row).
+            df = df.drop_duplicates(['event_id', 'category'])
         else:
             df = pd.read_sql_query("""
                 SELECT p.event_id, p.game_date, p.team_abbr, p.player_name,
@@ -2192,14 +2196,6 @@ class SportsDB:
         )
         conn.close()
         return df
-
-
-        conn = self.get_connection()
-        c = conn.cursor()
-        c.execute("SELECT * FROM game_summaries WHERE event_id=?", (event_id,))
-        row = c.fetchone()
-        conn.close()
-        return dict(row) if row else None
 
     def is_game_final(self, event_id: str) -> bool:
         """True if we already have a FINAL result stored for this game."""
@@ -4105,56 +4101,96 @@ def render_game_card(game: Any, db: Any = None, worker: Any = None, category: st
     if game.get('headline'):
         headline_html = f'<div style="font-size:12px;color:#333;font-style:italic;margin-top:4px">{game["headline"][:180]}</div>'
 
+    # ── Modern card: status row · team rows · line score · leaders · links ──
+    def _team_row(side: str, score: int, won: bool) -> str:
+        name = game.get(f'{side}_team', '') or game.get(f'{side}_abbr', '')
+        rec = game.get(f'{side}_record', '')
+        logo = game.get(f'{side}_logo', '')
+        color = home_color if side == 'home' else away_color
+        logo_html = (f'<img src="{logo}" alt="" style="width:30px;height:30px;object-fit:contain">'
+                     if logo else f'<span style="width:30px;height:30px;border-radius:50%;'
+                                  f'background:{color};display:inline-block"></span>')
+        show_score = is_final or is_live
+        weight = '800' if (won and is_final) else '600'
+        dim = '#94a3b8' if (is_final and not won) else '#0f172a'
+        return (f'<div class="tsg-row">{logo_html}'
+                f'<div class="tsg-name" style="font-weight:{weight};color:{dim}">{name}'
+                f'<span class="tsg-rec">{rec}</span></div>'
+                f'<div class="tsg-score" style="color:{dim};font-weight:{weight}">'
+                f'{score if show_score else ""}</div></div>')
+
+    if is_final:
+        pill = '<span class="tsg-pill" style="background:#e2e8f0;color:#334155">Final</span>'
+    elif is_live:
+        pill = (f'<span class="tsg-pill" style="background:#fee2e2;color:#b91c1c">● Live '
+                f'{game.get("clock", "")} · P{game.get("period", "")}</span>')
+    else:
+        pill = (f'<span class="tsg-pill" style="background:#e8efff;color:#1e40af">'
+                f'{game.get("status_detail", "Scheduled")}</span>')
+    if game.get('note'):
+        pill += f'<span class="tsg-pill" style="background:#ede9fe;color:#6d28d9">{game["note"]}</span>'
+    if game.get('neutral_site'):
+        pill += '<span class="tsg-pill" style="background:#f1f5f9;color:#475569">Neutral site</span>'
+
+    line_html = ''
+    if home_periods and away_periods:
+        cells = lambda vals: ''.join(f'<td>{v}</td>' for v in vals)
+        line_html = (
+            '<div class="tsg-line"><table><tr><th></th>'
+            + ''.join(f'<th>{h}</th>' for h in period_headers) + '<th>T</th></tr>'
+            f'<tr><td>{game.get("away_abbr", "")}</td>{cells(away_periods)}<td><b>{away_score}</b></td></tr>'
+            f'<tr><td>{game.get("home_abbr", "")}</td>{cells(home_periods)}<td><b>{home_score}</b></td></tr>'
+            '</table></div>')
+
+    leader_chips = ''.join(
+        f'<span class="tsg-chip"><b>{re.sub(r"(?i)(yards|leader)$", "", stat).replace("_", " ").title()}</b> '
+        f'{info.get("athlete", "?")} '
+        f'<span style="color:#0f172a;font-weight:700">{info.get("value", "")}</span></span>'
+        for stat, info in list(leaders.items())[:3] if isinstance(info, dict))
+    odds_line = ''
+    if odds.get('spread') or odds.get('over_under'):
+        bits = [b for b in (odds.get('spread') and f'Spread {odds["spread"]}',
+                            odds.get('over_under') and f'O/U {odds["over_under"]}') if b]
+        odds_line = f'<span class="tsg-chip">💰 {" · ".join(bits)}</span>'
+    foot = ''.join(
+        f'<a class="tsg-link" href="{links[k]}" target="_blank">{lbl}</a>'
+        for k, lbl in (('boxscore', 'Box score'), ('recap', 'Recap'), ('pbp', 'Play-by-play'))
+        if links.get(k))
+    meta = ' · '.join(x for x in (
+        venue_html + att_html,
+        f'📺 {game["broadcast"]}' if game.get('broadcast') else '',
+        f'🌤 {game["weather"]}' if game.get('weather') else '') if x)
+
     card_html = f'''
     <style>
-      .ts-card, .ts-card * {{
-        color: #111 !important;
-        -webkit-text-fill-color: #111 !important;
-      }}
-      .ts-card a, .ts-card a * {{
-        color: #2563eb !important;
-        -webkit-text-fill-color: #2563eb !important;
-      }}
-      .ts-card .ts-dim {{
-        color: #555 !important;
-        -webkit-text-fill-color: #555 !important;
-      }}
-      .ts-card .ts-status-final {{
-        background:#28a745;color:#fff !important;
-        -webkit-text-fill-color:#fff !important;
-        padding:2px 8px;border-radius:4px;font-size:12px;
-      }}
-      .ts-card .ts-status-live {{
-        background:#dc3545;color:#fff !important;
-        -webkit-text-fill-color:#fff !important;
-        padding:2px 8px;border-radius:4px;font-size:12px;
-      }}
-      .ts-card .ts-status-sched {{
-        background:#6c757d;color:#fff !important;
-        -webkit-text-fill-color:#fff !important;
-        padding:2px 8px;border-radius:4px;font-size:12px;
-      }}
-      .ts-card table td, .ts-card table th {{
-        color: #111 !important;
-        -webkit-text-fill-color: #111 !important;
-      }}
-      .ts-card .ts-away-name {{ color: {away_color} !important; -webkit-text-fill-color:{away_color} !important; }}
-      .ts-card .ts-home-name {{ color: {home_color} !important; -webkit-text-fill-color:{home_color} !important; }}
+      .tsg {{ background:#fff;border:1px solid #e5e9f2;border-radius:16px;padding:14px 16px;
+             margin-bottom:12px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 4px 16px rgba(15,23,42,.06);
+             font-family:Inter,system-ui,sans-serif;color:#0f172a; }}
+      .tsg-top {{ display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px; }}
+      .tsg-pill {{ font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px; }}
+      .tsg-row {{ display:flex;align-items:center;gap:10px;padding:5px 0; }}
+      .tsg-name {{ flex:1;font-size:15px;min-width:0; }}
+      .tsg-rec {{ font-size:12px;color:#94a3b8;font-weight:500;margin-left:6px; }}
+      .tsg-score {{ font-size:24px;min-width:44px;text-align:right;font-variant-numeric:tabular-nums; }}
+      .tsg-line {{ overflow-x:auto;margin:8px 0 2px; }}
+      .tsg-line table {{ border-collapse:collapse;font-size:12px;color:#475569; }}
+      .tsg-line th, .tsg-line td {{ padding:2px 8px;text-align:center; }}
+      .tsg-line td:first-child, .tsg-line th:first-child {{ text-align:left;font-weight:600;color:#0f172a; }}
+      .tsg-chips {{ display:flex;flex-wrap:wrap;gap:6px;margin-top:10px; }}
+      .tsg-chip {{ font-size:12px;color:#475569;background:#f1f5f9;border-radius:999px;padding:4px 10px; }}
+      .tsg-meta {{ font-size:12px;color:#64748b;margin-top:10px; }}
+      .tsg-link {{ font-size:12px;font-weight:600;color:#2563eb;text-decoration:none;margin-right:12px; }}
+      .tsg-head {{ font-size:13px;color:#334155;font-style:italic;margin-top:8px; }}
     </style>
-    <div class="ts-card" style="border:1px solid #d0d5e0;border-radius:10px;padding:14px 16px;
-                margin-bottom:14px;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,0.08)">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-        <div>{status_html_cls}{note_html}{extra_badges}</div>
-        <div class="ts-dim" style="font-size:11px">{venue_html}{att_html}</div>
-      </div>
-      <div class="ts-dim" style="font-size:11px;margin-bottom:2px">{records_html if records_html else ""}</div>
-      {period_html}
-      {headline_html}
-      {odds_html}
-      <div style="margin-top:8px">{leaders_html}</div>
-      <div style="margin-top:6px;display:flex;align-items:center;gap:8px">
-        {links_html}{broadcast_html}{weather_html}
-      </div>
+    <div class="tsg">
+      <div class="tsg-top">{pill}</div>
+      {_team_row('away', away_score, (not home_win) and is_final)}
+      {_team_row('home', home_score, home_win)}
+      {line_html}
+      {f'<div class="tsg-head">{game["headline"][:180]}</div>' if game.get('headline') else ''}
+      {f'<div class="tsg-chips">{leader_chips}{odds_line}</div>' if (leader_chips or odds_line) else ''}
+      {f'<div class="tsg-meta">{meta}</div>' if meta else ''}
+      {f'<div style="margin-top:8px">{foot}</div>' if foot else ''}
     </div>
     '''
     st.html(card_html)
@@ -5576,7 +5612,7 @@ def main():
             with _sb_c3:
                 _sb_status_filter = st.radio(
                     "Show",
-                    ["All", "🔴 Live", "✅ Final", "🗓 Scheduled"],
+                    ["All", "🔴 Live", "✅ Final", "📅 Scheduled"],
                     horizontal=True, key="sb_status_filter",
                     label_visibility="collapsed"
                 )
@@ -5606,7 +5642,7 @@ def main():
                 elif _sb_status_filter == "✅ Final":
                     df_games = df_games[df_games['status'].str.contains(
                         'FINAL', na=False, case=False)]
-                elif _sb_status_filter == "🗓 Scheduled":
+                elif _sb_status_filter == "📅 Scheduled":
                     df_games = df_games[~df_games['status'].str.contains(
                         'FINAL|PROGRESS|HALF|LIVE', na=False, case=False)]
 
@@ -5671,24 +5707,33 @@ def main():
                     if not _df_rest.empty:
                         # Ensure event_date is string for grouping
                         _df_rest['event_date'] = _df_rest['event_date'].astype(str)
-                        _dates_sorted = sorted(_df_rest['event_date'].unique(), reverse=True)
                         _today_str    = _dt1.datetime.now().strftime('%Y-%m-%d')
+                        # Upcoming (soonest first), then results (most recent first).
+                        _all_d = _df_rest['event_date'].unique()
+                        _up_d = sorted(d for d in _all_d if d >= _today_str)
+                        _past_d = sorted((d for d in _all_d if d < _today_str), reverse=True)
+                        _dates_sorted = _up_d + _past_d
+                        _open_d = {_up_d[0] if _up_d else None, _past_d[0] if _past_d else None}
 
                         for _d in _dates_sorted:
+                            if _up_d and _d == _up_d[0]:
+                                st.markdown("### 📅 Upcoming")
+                            if _past_d and _d == _past_d[0]:
+                                st.markdown("### ✅ Results")
                             _d_games = _df_rest[_df_rest['event_date'] == _d]
                             _n       = len(_d_games)
                             _fin     = int(_d_games['status'].str.contains('FINAL', na=False).sum())
                             _scd     = _n - _fin
 
                             _statbadge = (f"✅ {_fin} final" if _fin == _n
-                                          else f"🗓 {_scd} scheduled" if _fin == 0
-                                          else f"✅ {_fin}  🗓 {_scd}")
+                                          else f"📅 {_scd} scheduled" if _fin == 0
+                                          else f"✅ {_fin}  📅 {_scd}")
 
                             # Use a toggle button to collapse/expand each date group.
                             # st.expander cannot be used here because render_game_card
                             # itself contains st.expander (Streamlit forbids nesting).
                             _tog_key   = f'sb_date_open_{_d}'
-                            _auto_open = (_d == _today_str or _d == _dates_sorted[0])
+                            _auto_open = _d in _open_d
                             if _tog_key not in st.session_state:
                                 st.session_state[_tog_key] = _auto_open
 
@@ -6500,7 +6545,7 @@ def main():
 
     # ── TAB 4: TEAMS ──────────────────────────────────────────
     if _page == 4:
-        st.subheader("Teams")
+        _render_tab_banner("Teams", "Rosters, records, venues and staff")
         _render_how_it_works('teams')
         active_eps = json.loads(db.get_config('active_endpoints', '[]'))
 
@@ -6826,7 +6871,7 @@ def main():
 
     # ── TAB 5: NEWS ───────────────────────────────────────────
     if _page == 5:
-        st.subheader("Latest News")
+        _render_tab_banner("News", "Latest headlines")
         _render_how_it_works('news')
         active_eps = json.loads(db.get_config('active_endpoints', '[]'))
 
@@ -9144,11 +9189,7 @@ def main():
 
     # ── TAB 10: CUSTOM VIEWS ────────────────────────────────────
     if _page == 10:
-        st.subheader("📋 Custom Views")
-        st.caption(
-            "Run saved views from this session, from disk, or downloaded from the Admin Panel. "
-            "Build new views in the **🔬 Schema Explorer** tab."
-        )
+        _render_tab_banner("Custom Views", "Saved charts and tables built from ESPN data")
 
         _cv_dir9 = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'custom_views')
         _cv_pub9 = os.path.join(_cv_dir9, 'public')
@@ -9168,51 +9209,23 @@ def main():
              and os.path.isfile(os.path.join(_cv_pub9, f))]
         )
 
-        _cv9_c1, _cv9_c2 = st.columns([1, 1])
-        with _cv9_c1:
-            if _cv9_disk_files:
-                _cv9_load_sel = st.multiselect(
-                    "Load saved views from disk",
-                    _cv9_disk_files,
-                    key='cv9_load_sel',
-                )
-                if st.button("▶ Load Selected", key='cv9_load_btn'):
-                    for _fn9 in _cv9_load_sel:
-                        try:
-                            with open(os.path.join(_cv_dir9, _fn9),
-                                      encoding='utf-8') as _f9:
-                                _loaded = json.load(_f9)
-                            if _loaded not in st.session_state['cv_session_views']:
-                                st.session_state['cv_session_views'].append(_loaded)
-                        except Exception as _le:
-                            st.warning(f"Could not load {_fn9}: {_le}")
-                    st.rerun()
-        with _cv9_c2:
-            if _cv9_pub_files:
-                st.caption(f"**{len(_cv9_pub_files)} public view(s)** available from Admin Panel")
-                _cv9_pub_sel = st.multiselect(
-                    "Load public views",
-                    _cv9_pub_files,
-                    key='cv9_pub_sel',
-                )
-                if st.button("▶ Load Public Views", key='cv9_pub_btn'):
-                    for _fn9 in _cv9_pub_sel:
-                        try:
-                            with open(os.path.join(_cv_pub9, _fn9),
-                                      encoding='utf-8') as _f9:
-                                _loaded = json.load(_f9)
-                            if _loaded not in st.session_state['cv_session_views']:
-                                st.session_state['cv_session_views'].append(_loaded)
-                        except Exception as _le:
-                            st.warning(f"Could not load {_fn9}: {_le}")
-                    st.rerun()
+        # Every saved and public view loads automatically — no buttons.
+        for _cv9_dir, _cv9_files in ((_cv_dir9, _cv9_disk_files), (_cv_pub9, _cv9_pub_files)):
+            for _fn9 in _cv9_files:
+                try:
+                    with open(os.path.join(_cv9_dir, _fn9), encoding='utf-8') as _f9:
+                        _loaded = json.load(_f9)
+                    if _loaded not in st.session_state['cv_session_views']:
+                        st.session_state['cv_session_views'].append(_loaded)
+                except Exception as _le:
+                    st.warning(f"Could not load {_fn9}: {_le}")
 
         # ── Render session views ──────────────────────────
         _sv_list = st.session_state.get('cv_session_views', [])
         if not _sv_list:
             st.info(
-                "No views loaded yet. Build one in **🔬 Schema Explorer → Custom View Builder**, "
-                "or load a saved view above."
+                "No custom views have been published yet. Admins can build them in "
+                "**🔬 Schema Explorer → Custom View Builder**."
             )
         else:
             for _vi, _vcfg in enumerate(_sv_list):

@@ -256,7 +256,7 @@ def _compare_teams(db, worker, ep, season, ensure_box, goto,
 
 def render_matchups_page(db: Any, worker: Any, season_for: Callable[[str], int],
                          ensure_box: Callable, goto: Callable) -> None:
-    st.subheader('⚔️ Matchups')
+    st.markdown('## ⚔️ Matchups')
     st.caption('Upcoming games with an expected outcome from team form and player '
                'availability, plus moneylines side by side. Tap **Compare** for the full breakdown.')
 

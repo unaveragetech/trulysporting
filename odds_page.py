@@ -181,7 +181,7 @@ def _book_home_nv(r) -> Optional[float]:
 
 
 def render_odds_page(db) -> None:
-    st.subheader('🎯 Odds & Lines')
+    st.markdown('## 🎯 Odds & Lines')
     st.caption('FanDuel (The Odds API) · ESPN scoreboard odds · Kalshi prediction market. '
                'Informational only — bets are placed by you on the sportsbook.')
 
