@@ -11,6 +11,7 @@ production from stored box scores.
 """
 import json
 import math
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional
@@ -149,6 +150,131 @@ def predict(ep: str, home: Dict, away: Dict, pen_h: float = 0.0, pen_a: float = 
             'home_pts': total / 2 + margin / 2, 'away_pts': total / 2 - margin / 2}
 
 
+# ── Slate: every upcoming game with markets + model ─────────
+
+_SLATE_CACHE: Dict[tuple, tuple] = {}
+_SLATE_TTL = 300  # seconds; lines move, so keep it short
+
+
+def build_slate(db: Any, worker: Any, ep: str, season: int, include_fd: bool = True):
+    """Upcoming games for a league with ESPN/FanDuel/Kalshi markets attached and
+    model columns: pred (dict or None), form_home, form_away. Returns (df, err).
+    Cached for 5 minutes and shared by Matchups and Best Bets."""
+    key = (ep, season, include_fd)
+    hit = _SLATE_CACHE.get(key)
+    if hit and time.time() - hit[0] < _SLATE_TTL:
+        return hit[1].copy(), hit[2]
+    games, err = _build_slate(db, worker, ep, season, include_fd)
+    _SLATE_CACHE[key] = (time.time(), games, err)
+    return games.copy(), err
+
+
+def _build_slate(db: Any, worker: Any, ep: str, season: int, include_fd: bool):
+    cat, spt = ep.split('/')
+    games, err = fetch_espn_lines(ep)
+    if not games.empty:
+        games = games[games['status'] == 'pre'].reset_index(drop=True)
+    if games.empty:
+        return games, err
+    if ep in KALSHI_SERIES:
+        games = attach_kalshi(games, fetch_kalshi_markets(KALSHI_SERIES[ep])[0])
+    else:
+        games['kalshi_home'] = None
+    fd = pd.DataFrame()
+    if include_fd and _api_key() and ep in ODDS_SPORT_MAP:
+        fd = events_to_df(fetch_fanduel_odds(ODDS_SPORT_MAP[ep], _api_key())[0])
+    games = attach_fanduel(games, fd)
+
+    team_ids = sorted(set(games['home_id']) | set(games['away_id']))
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        forms = dict(zip(team_ids, pool.map(
+            lambda t: team_form(db, worker, cat, spt, t, season), team_ids)))
+    preds, fh_l, fa_l = [], [], []
+    for g in games.itertuples():
+        fh, fa = forms.get(g.home_id, {'n': 0}), forms.get(g.away_id, {'n': 0})
+        ph = injury_penalty(db, ep, g.home_id, g.home_abbr, fh.get('pf', 0))['penalty']
+        pa = injury_penalty(db, ep, g.away_id, g.away_abbr, fa.get('pf', 0))['penalty']
+        pred = predict(ep, fh, fa, ph, pa)
+        if pred:
+            pred.update(pen_home=ph, pen_away=pa)
+        preds.append(pred)
+        fh_l.append(fh)
+        fa_l.append(fa)
+    games['pred'], games['form_home'], games['form_away'] = preds, fh_l, fa_l
+    return games, err
+
+
+def league_avg_allowed(forms) -> Optional[float]:
+    vals = [f['pa'] for f in forms if f.get('n')]
+    return sum(vals) / len(vals) if vals else None
+
+
+# Stats worth projecting per box-score category (others are noise).
+_PROJ_STATS = {
+    'passing': ['YDS', 'TD', 'INT'], 'rushing': ['CAR', 'YDS', 'TD'],
+    'receiving': ['REC', 'YDS', 'TD', 'TGTS'], 'defensive': ['TOT', 'SACKS'],
+    'stats': ['PTS', 'REB', 'AST', '3PT', 'STL', 'BLK'],
+    'forwards': ['G', 'A', 'S', 'SOG'], 'defenses': ['G', 'A', 'BS', 'HT'],
+    'goalies': ['SV', 'GA'], 'batting': ['H', 'R', 'HR', 'RBI'], 'pitching': ['IP', 'K', 'ER'],
+}
+
+
+def player_projections(db: Any, ep: str, team_abbr: str, opp_factor: float = 1.0,
+                       top: int = 5) -> Dict[str, pd.DataFrame]:
+    """Projected stat line per player for the next game, by category.
+
+    projection = (0.6 x last-3 average + 0.4 x last-8 average) x opponent factor,
+    where opponent factor = opponent's points allowed / league average (capped
+    0.8-1.2). Only players who appeared in at least 2 of the team's last 8 games."""
+    raw = db.get_team_players_stats(ep, team_abbr)
+    if raw.empty:
+        return {}
+    rows = []
+    for r in raw.itertuples():
+        keep = _PROJ_STATS.get((r.category or 'stats').lower())
+        if not keep:
+            continue
+        try:
+            labels, vals = json.loads(r.stat_labels), json.loads(r.stat_values)
+        except Exception:
+            continue
+        for lab, v in zip(labels, vals):
+            if lab not in keep:
+                continue
+            try:
+                num = float(str(v).split('-')[0].split('/')[0].replace(',', ''))
+            except ValueError:
+                continue
+            rows.append((r.player_name, (r.category or 'stats').lower(), lab, num,
+                         r.event_id, r.game_date or ''))
+    df = pd.DataFrame(rows, columns=['player', 'category', 'stat', 'value', 'event', 'date'])
+    if df.empty:
+        return {}
+    recent = (df[['event', 'date']].drop_duplicates('event')
+              .sort_values('date', ascending=False)['event'].head(8).tolist())
+    df = df[df['event'].isin(recent)].copy()
+    df['rank'] = df['event'].map({e: i for i, e in enumerate(recent)})
+    f = min(1.2, max(0.8, opp_factor or 1.0))
+    out = {}
+    for cat, sub in df.groupby('category'):
+        l8 = sub.groupby(['player', 'stat'])['value'].mean()
+        l3 = sub[sub['rank'] < 3].groupby(['player', 'stat'])['value'].mean()
+        gp = sub.groupby('player')['event'].nunique()
+        proj = 0.6 * l3.reindex(l8.index).fillna(l8) + 0.4 * l8
+        # Volume stats scale with the matchup; defense/goalie/pitching less so.
+        if cat in ('passing', 'rushing', 'receiving', 'stats', 'forwards', 'batting'):
+            proj = proj * f
+        wide = proj.unstack('stat')
+        wide = wide[gp.reindex(wide.index).fillna(0) >= 2]
+        if wide.empty:
+            continue
+        cols = [c for c in _PROJ_STATS[cat] if c in wide.columns]
+        wide = wide[cols].sort_values(cols[0], ascending=False).head(top).round(1)
+        wide.insert(0, 'GP', gp.reindex(wide.index).astype(int))
+        out[cat] = wide
+    return out
+
+
 # ── Rendering ────────────────────────────────────────────────
 
 def _fmt_pts(v: float, ep: str) -> str:
@@ -240,6 +366,26 @@ def _compare_teams(db, worker, ep, season, ensure_box, goto,
                         top = wide.sort_values(rank, ascending=False)[keep].head(6).round(1)
                         st.dataframe(top, use_container_width=True)
 
+    # Projected stat lines vs this opponent.
+    lg_pa = league_avg_allowed([fh, fa])
+    pj_a = player_projections(db, ep, a_abbr, (fh.get('pa', 0) / lg_pa) if lg_pa else 1.0)
+    pj_h = player_projections(db, ep, h_abbr, (fa.get('pa', 0) / lg_pa) if lg_pa else 1.0)
+    pcats = ([c for c in _CAT_ORDER if c in pj_a or c in pj_h]
+             + sorted((set(pj_a) | set(pj_h)) - set(_CAT_ORDER)))
+    if pcats:
+        st.markdown('**🔮 Projected player lines** · recent form x opponent defense')
+        ptabs = st.tabs([c.title() for c in pcats])
+        for tab, c in zip(ptabs, pcats):
+            with tab:
+                cols = st.columns(2)
+                for col, abbr, pj in ((cols[0], a_abbr, pj_a), (cols[1], h_abbr, pj_h)):
+                    with col:
+                        st.markdown(f'**{abbr}**')
+                        if c in pj:
+                            st.dataframe(pj[c], use_container_width=True)
+                        else:
+                            st.caption('—')
+
     inj_rows = [{'Team': abbr, 'Player': p['name'], 'Pos': p['pos'], 'Status': p['status'],
                  'Share of production': f"{p['share']:.0%}" if p['share'] else '—'}
                 for abbr, inj in ((a_abbr, ia), (h_abbr, ih)) for p in inj['players'][:8]]
@@ -266,38 +412,19 @@ def render_matchups_page(db: Any, worker: Any, season_for: Callable[[str], int],
     cat, spt = ep.split('/')
     season = season_for(cat)
 
-    games, err = fetch_espn_lines(ep)
+    with st.spinner('Crunching team form…'):
+        games, err = build_slate(db, worker, ep, season)
     if err:
         st.error(f'ESPN: {err}')
-    if not games.empty:
-        games = games[games['status'] == 'pre'].reset_index(drop=True)
     if games.empty:
         st.info('No upcoming games on the schedule for this league right now.')
         return
 
-    if ep in KALSHI_SERIES:
-        games = attach_kalshi(games, fetch_kalshi_markets(KALSHI_SERIES[ep])[0])
-    else:
-        games['kalshi_home'] = None
-    fd = pd.DataFrame()
-    if _api_key() and ep in ODDS_SPORT_MAP:
-        fd = events_to_df(fetch_fanduel_odds(ODDS_SPORT_MAP[ep], _api_key())[0])
-    games = attach_fanduel(games, fd)
-
-    # Team form for every team on the slate (schedules are cached by the worker).
-    team_ids = sorted(set(games['home_id']) | set(games['away_id']))
-    with st.spinner('Crunching team form…'):
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            forms = dict(zip(team_ids, pool.map(
-                lambda t: team_form(db, worker, cat, spt, t, season), team_ids)))
-
     tz = datetime.now().astimezone().tzinfo
     sel = st.session_state.get('mu_open')
     for g in games.itertuples():
-        fh, fa = forms.get(g.home_id, {'n': 0}), forms.get(g.away_id, {'n': 0})
-        ph = injury_penalty(db, ep, g.home_id, g.home_abbr, fh.get('pf', 0))['penalty']
-        pa = injury_penalty(db, ep, g.away_id, g.away_abbr, fa.get('pf', 0))['penalty']
-        pred = predict(ep, fh, fa, ph, pa)
+        fh, fa, pred = g.form_home, g.form_away, g.pred
+        ph, pa = (pred or {}).get('pen_home', 0), (pred or {}).get('pen_away', 0)
         start = pd.to_datetime(g.date).tz_convert(tz).strftime('%a %b %d · %I:%M %p')
 
         with st.container(border=True):
