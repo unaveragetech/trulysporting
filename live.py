@@ -6,6 +6,7 @@ that ranks model-vs-market edges on upcoming games.
 ESPN's public feeds lag the broadcast by roughly 10–60 seconds; the page
 refreshes itself every 20 seconds.
 """
+import json
 import math
 import time
 from datetime import datetime
@@ -385,6 +386,20 @@ def render_best_bets(db: Any, worker: Any, ep: str, season: int, label: Callable
     if games.empty:
         st.info('No upcoming games with lines for this league right now.')
         return
+    # Track record from the walk-forward backtest (📊 Backtest page).
+    try:
+        rec = json.loads(db.get_config(f'backtest_summary_{ep}', '') or '{}')
+    except ValueError:
+        rec = {}
+    if rec.get('bet_n'):
+        msg = (f"**Track record:** this strategy (edge ≥ {rec['edge']:.0%}) was tested on "
+               f"{int(rec['games']):,} past games: {int(rec['bet_n']):,} bets, "
+               f"ROI **{rec['bet_roi']:+.1%}**. The model picks winners "
+               f"{rec['accuracy']:.1%} of the time vs the closing line's "
+               f"{(rec.get('mkt_accuracy') or 0):.1%}.")
+        (st.warning if (rec.get('bet_roi') or 0) < 0 else st.success)(
+            msg + (' It has **lost money** historically — treat these as ideas, not picks.'
+                   if (rec.get('bet_roi') or 0) < 0 else ''))
     bets = find_bets(games, ep)
     if bets.empty:
         st.info('Not enough completed games yet to model this slate.')
