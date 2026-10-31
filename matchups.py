@@ -144,6 +144,27 @@ def injury_penalty(db: Any, ep: str, team_id: str, team_abbr: str, pf: float) ->
 CALIBRATION: Dict[str, float] = {}
 
 
+# Weight on the model when blending with the market (logit space), fitted by
+# the backtest. 0 = trust the market entirely, 1 = model only.
+BLEND: Dict[str, float] = {}
+
+
+def _logit(p: float) -> float:
+    p = min(1 - 1e-4, max(1e-4, p))
+    return math.log(p / (1 - p))
+
+
+def blended_prob(ep: str, p_model: Optional[float], p_market: Optional[float]) -> Optional[float]:
+    """Market-anchored probability: the market line, nudged toward the model by
+    the backtest-fitted weight. Falls back to the model when there's no line."""
+    if p_model is None:
+        return p_market
+    if p_market is None:
+        return p_model
+    w = BLEND.get(ep, 0.3)
+    return 1 / (1 + math.exp(-(_logit(p_market) + w * (_logit(p_model) - _logit(p_market)))))
+
+
 def predict(ep: str, home: Dict, away: Dict, pen_h: float = 0.0, pen_a: float = 0.0,
             calibrate: bool = True) -> Optional[Dict]:
     if not home.get('n') or not away.get('n'):
@@ -295,7 +316,7 @@ def _ml_table(g, model_p: Optional[float]) -> pd.DataFrame:
 
     rows = []
     if model_p is not None:
-        rows.append(('📐 Model (fair)', prob_to_american(model_p), prob_to_american(1 - model_p), model_p))
+        rows.append(('📐 Model (market-anchored)', prob_to_american(model_p), prob_to_american(1 - model_p), model_p))
     if _ok(g.fd_home_ml):
         rows.append(('FanDuel', g.fd_home_ml, g.fd_away_ml, nv(g.fd_home_ml, g.fd_away_ml)))
     if _ok(g.espn_home_ml):
@@ -461,7 +482,16 @@ def render_matchups_page(db: Any, worker: Any, season_for: Callable[[str], int],
             else:
                 st.caption('Not enough completed games yet to project this one.')
 
-            ml = _ml_table(g, pred['p_home'] if pred else None)
+            # Market-anchored: blend the model into the best available line.
+            _mkt = None
+            for _h, _a in ((g.fd_home_ml, g.fd_away_ml), (g.espn_home_ml, g.espn_away_ml)):
+                _ph, _pa = american_to_prob(_h), american_to_prob(_a)
+                if _ph and _pa:
+                    _mkt = _ph / (_ph + _pa)
+                    break
+            if _mkt is None and _ok(g.kalshi_home):
+                _mkt = float(g.kalshi_home)
+            ml = _ml_table(g, blended_prob(ep, pred['p_home'], _mkt) if pred else None)
             if not ml.empty:
                 st.dataframe(ml, hide_index=True, use_container_width=True)
 

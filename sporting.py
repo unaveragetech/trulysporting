@@ -22,7 +22,8 @@ import ui
 from live import render_live_page
 import matchups as _mu
 from backtest import (apply_shrink, fit_shrink, load_games, render_backtest_page,
-                      run_backtest, save_summary as save_backtest_summary)
+                      run_backtest, save_model_settings,
+                      save_summary as save_backtest_summary)
 from engine import LeagueSync, describe as describe_sync
 from fanduel_odds import ODDS_SPORT_MAP
 from odds_page import KALSHI_SERIES
@@ -5266,7 +5267,8 @@ def main():
 
     # Model calibration fitted by the backtest (once per league per session).
     _cal_key = f'model_shrink_{g_league}'
-    if (not db.get_config(_cal_key, '') and g_league in MATCHUP_LEAGUES
+    if ((not db.get_config(_cal_key, '') or not db.get_config(f'model_blend_{g_league}', ''))
+            and g_league in MATCHUP_LEAGUES
             and not st.session_state.get(f'_cal_tried_{g_league}')):
         st.session_state[f'_cal_tried_{g_league}'] = True
         _n_bt = len(load_games(db.db_name, g_league))
@@ -5276,11 +5278,13 @@ def main():
                 _k_fit = fit_shrink(_bt, g_league)
                 db.update_config(_cal_key, str(_k_fit))
                 save_backtest_summary(db, g_league, apply_shrink(_bt, g_league, _k_fit))
+                save_model_settings(db, g_league, apply_shrink(_bt, g_league, _k_fit))
     for _ep_c in _active_g:
         try:
             _mu.CALIBRATION[_ep_c] = float(db.get_config(f'model_shrink_{_ep_c}', '1') or 1)
+            _mu.BLEND[_ep_c] = float(db.get_config(f'model_blend_{_ep_c}', '0.3') or 0.3)
         except ValueError:
-            _mu.CALIBRATION[_ep_c] = 1.0
+            _mu.CALIBRATION[_ep_c], _mu.BLEND[_ep_c] = 1.0, 0.3
 
     # Drive every page's league picker from the header and hide the duplicates.
     _odds_ok = g_league in (set(ODDS_SPORT_MAP) | set(KALSHI_SERIES))

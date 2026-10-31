@@ -214,6 +214,86 @@ def save_summary(db: Any, ep: str, df: pd.DataFrame, edge: float = 0.03) -> Dict
     return out
 
 
+def with_market(df: pd.DataFrame) -> pd.DataFrame:
+    """Games that have a closing moneyline, with the no-vig market probability."""
+    mk = df.dropna(subset=['home_ml', 'away_ml']).copy()
+    mk['p_mkt'] = [_nv(h, a) for h, a in zip(mk['home_ml'], mk['away_ml'])]
+    return mk.dropna(subset=['p_mkt'])
+
+
+def blend_series(df: pd.DataFrame, w: float) -> pd.Series:
+    lg = lambda p: math.log(min(1 - 1e-4, max(1e-4, p)) / (1 - min(1 - 1e-4, max(1e-4, p))))
+    return pd.Series([1 / (1 + math.exp(-(lg(m) + w * (lg(p) - lg(m)))))
+                      for p, m in zip(df['p_home'], df['p_mkt'])], index=df.index)
+
+
+def fit_blend(mk: pd.DataFrame) -> float:
+    """Model weight (0–1) that minimises Brier over games with a closing line."""
+    if len(mk) < 50:
+        return 0.0
+    grid = [i / 10 for i in range(11)]
+    return min(grid, key=lambda w: ((blend_series(mk, w) - mk['home_won']) ** 2).mean())
+
+
+_SIDES = {'all': lambda pr: True, 'underdogs': lambda pr: pr > 0, 'favorites': lambda pr: pr < 0}
+
+
+def rule_bets(mk: pd.DataFrame, w: float, edge: float, side: str) -> pd.DataFrame:
+    p = blend_series(mk, w)
+    out = []
+    for r, pb in zip(mk.itertuples(), p):
+        if r.home_won == 0.5:
+            continue
+        for pm, pk, price, won, nm in ((pb, r.p_mkt, r.home_ml, r.home_won == 1, 'home'),
+                                       (1 - pb, 1 - r.p_mkt, r.away_ml, r.home_won == 0, 'away')):
+            if pm - pk >= edge and _SIDES[side](price):
+                out.append({'date': r.date, 'season': r.season, 'game': r.game, 'side': nm,
+                            'price': price, 'edge': pm - pk,
+                            'profit': _american_profit(price) if won else -100.0})
+    return pd.DataFrame(out)
+
+
+def validate_rules(mk: pd.DataFrame, w: float, min_bets: int = 30) -> Dict:
+    """Try bet rules (edge x side). A rule is *validated* only if it was
+    profitable in both the earlier and the later half of the seasons, with at
+    least `min_bets` bets in each — so one lucky stretch can't pass."""
+    seasons = sorted(mk['season'].unique())
+    if len(seasons) < 2:
+        return {'rules': pd.DataFrame(), 'best': None, 'early': [], 'late': []}
+    early = set(seasons[:len(seasons) // 2])
+    rows = []
+    for edge in (0.02, 0.03, 0.04, 0.05, 0.06, 0.08):
+        for side in _SIDES:
+            b = rule_bets(mk, w, edge, side)
+            if b.empty:
+                continue
+            e, l = b[b['season'].isin(early)], b[~b['season'].isin(early)]
+            roi = lambda x: x['profit'].sum() / (100 * len(x)) if len(x) else float('nan')
+            ok = len(e) >= min_bets and len(l) >= min_bets and roi(e) > 0 and roi(l) > 0
+            rows.append({'edge': edge, 'side': side, 'bets_early': len(e), 'roi_early': roi(e),
+                         'bets_late': len(l), 'roi_late': roi(l), 'validated': ok})
+    rules = pd.DataFrame(rows)
+    best = None
+    if not rules.empty and rules['validated'].any():
+        v = rules[rules['validated']].copy()
+        v['worst'] = v[['roi_early', 'roi_late']].min(axis=1)
+        best = v.sort_values('worst', ascending=False).iloc[0].to_dict()
+    return {'rules': rules, 'best': best, 'early': [int(x) for x in sorted(early)],
+            'late': [int(x) for x in seasons if x not in early]}
+
+
+def save_model_settings(db: Any, ep: str, df_cal: pd.DataFrame) -> Dict:
+    """Fit the market blend and validate bet rules; store both for the app."""
+    mk = with_market(df_cal)
+    w = fit_blend(mk)
+    val = validate_rules(mk, w)
+    db.update_config(f'model_blend_{ep}', str(w))
+    db.update_config(f'bet_rule_{ep}', json.dumps(
+        {k: (float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v)
+         for k, v in val['best'].items()} if val['best'] else {}))
+    return {'w': w, 'mk': mk, **val}
+
+
 def calibration(df: pd.DataFrame) -> pd.DataFrame:
     p_fav = df['p_home'].where(df['p_home'] >= .5, 1 - df['p_home'])
     fav_won = df['home_won'].where(df['p_home'] >= .5, 1 - df['home_won'])
@@ -254,6 +334,7 @@ def render_backtest_page(db: Any, ep: str, label, bounds) -> None:
             f" → {((df['p_home'] - df['home_won']) ** 2).mean():.4f} (lower is better).")
 
     save_summary(db, ep, df)
+    ms = save_model_settings(db, ep, df)
 
     seasons = sorted(df['season'].unique())
     c1, c2 = st.columns([2, 1])
@@ -309,6 +390,38 @@ def render_backtest_page(db: Any, ep: str, label, bounds) -> None:
         fig.update_layout(height=260, margin=dict(l=10, r=10, t=10, b=10),
                           xaxis_title='Bet #', yaxis_title='Cumulative profit ($)')
         st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown('#### 🧪 Market-anchored model & bet-rule validation')
+    mk = ms['mk']
+    if len(mk) >= 50:
+        b_mkt = ((mk['p_mkt'] - mk['home_won']) ** 2).mean()
+        b_mod = ((mk['p_home'] - mk['home_won']) ** 2).mean()
+        b_bl = ((blend_series(mk, ms['w']) - mk['home_won']) ** 2).mean()
+        m = st.columns(3)
+        m[0].metric('Market alone (Brier)', f'{b_mkt:.4f}')
+        m[1].metric('Model alone', f'{b_mod:.4f}')
+        m[2].metric(f"Blended ({ms['w']:.0%} model)", f'{b_bl:.4f}',
+                    help='The app now uses this blend wherever a market line exists.')
+        if ms['best']:
+            r = ms['best']
+            st.success(f"**Validated rule:** {r['side']} with edge ≥ {r['edge']:.0%} made money in "
+                       f"both {ms['early']} ({r['roi_early']:+.1%}, {int(r['bets_early'])} bets) and "
+                       f"{ms['late']} ({r['roi_late']:+.1%}, {int(r['bets_late'])} bets). "
+                       "Best Bets uses this rule.")
+        else:
+            st.warning("**No bet rule passed validation** — none made money in both the earlier "
+                       f"seasons {ms['early']} and the later seasons {ms['late']}. Best Bets will "
+                       "show model leans only, not recommendations.")
+        if not ms['rules'].empty:
+            t = ms['rules'].copy()
+            for c in ('roi_early', 'roi_late'):
+                t[c] = t[c].map(lambda v: '—' if v != v else f'{v:+.1%}')
+            t['edge'] = t['edge'].map('{:.0%}'.format)
+            t['validated'] = t['validated'].map({True: '✅', False: '—'})
+            with st.expander('All rules tested'):
+                st.dataframe(t, hide_index=True, use_container_width=True)
+    else:
+        st.caption('Need at least 50 games with closing lines to fit the blend.')
 
     st.markdown('#### Calibration · when the model says X%, does it happen X% of the time?')
     cal = calibration(view)
