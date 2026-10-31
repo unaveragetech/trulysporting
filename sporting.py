@@ -18,6 +18,11 @@ import plotly.graph_objects as go
 import plotly.express as px
 from odds_page import render_odds_page
 from matchups import render_matchups_page
+import ui
+from engine import LeagueSync, describe as describe_sync
+from fanduel_odds import ODDS_SPORT_MAP
+from odds_page import KALSHI_SERIES
+from matchups import _HFA as MATCHUP_LEAGUES
 
 # ─────────────────────────────────────────────────────────────
 # SCHEMA UTILITIES  (used by SchemaCrawler + Schema Explorer tab)
@@ -1570,9 +1575,9 @@ class SportsDB:
         conn.close()
         return df
 
-    def get_season_games_df(self, category: str, sport: str,
-                             season_year: int) -> pd.DataFrame:
-        """Return ALL stored games for an entire season.
+    @staticmethod
+    def season_bounds(category: str, season_year: int) -> Tuple[str, str]:
+        """(start, end) dates of an ESPN season year.
 
         ESPN season-year convention:
         - football:  season year = year season STARTS  (2025 → Aug 2025 – Mar 2026)
@@ -1592,7 +1597,12 @@ class SportsDB:
         else:
             # soccer: season ENDS in yr (e.g. EPL 2025-26 = season 2026)
             start, end = f'{yr-1}-07-01', f'{yr}-07-01'
+        return start, end
 
+    def get_season_games_df(self, category: str, sport: str,
+                            season_year: int) -> pd.DataFrame:
+        """Return ALL stored games for an entire season."""
+        start, end = self.season_bounds(category, season_year)
         conn = self.get_connection()
         df = pd.read_sql_query(
             """SELECT * FROM game_history
@@ -1916,7 +1926,8 @@ class SportsDB:
             df = pd.read_sql_query("""
                 SELECT p.event_id, p.game_date, p.team_abbr, p.player_name,
                        p.category, p.stat_labels, p.stat_values, p.headshot_url,
-                       h.home_team, h.away_team, h.home_score, h.away_score, h.status
+                       h.home_team, h.away_team, h.home_score, h.away_score, h.status,
+                       h.event_date
                 FROM player_game_stats p
                 LEFT JOIN game_history h ON h.event_id = p.event_id
                 WHERE p.sport_key=?
@@ -1927,7 +1938,8 @@ class SportsDB:
             df = pd.read_sql_query("""
                 SELECT p.event_id, p.game_date, p.team_abbr, p.player_name,
                        p.category, p.stat_labels, p.stat_values, p.headshot_url,
-                       h.home_team, h.away_team, h.home_score, h.away_score, h.status
+                       h.home_team, h.away_team, h.home_score, h.away_score, h.status,
+                       h.event_date
                 FROM player_game_stats p
                 LEFT JOIN game_history h ON h.event_id = p.event_id
                 WHERE p.sport_key=? AND LOWER(p.player_name) LIKE ?
@@ -2004,6 +2016,10 @@ class SportsDB:
     def save_team_roster(self, sport_key: str, team_id: str, team_abbr: str,
                          position_groups: List[Dict]):
         """Bulk upsert roster rows from /teams/{abbr}/roster response."""
+        # NBA/WNBA/college hoops return a flat athlete list instead of
+        # position groups ({position, items}); wrap it as one group.
+        if position_groups and 'items' not in position_groups[0]:
+            position_groups = [{'position': 'Roster', 'items': position_groups}]
         conn = self.get_connection()
         c = conn.cursor()
         now = datetime.now().isoformat()
@@ -2688,10 +2704,46 @@ def clear_read_cache():
 
 
 for _name, _fn in list(vars(SportsDB).items()):
-    if not callable(_fn) or _name.startswith('_') or _name in ('get_connection', 'init_db'):
+    if (not callable(_fn) or isinstance(_fn, (staticmethod, classmethod))
+            or _name.startswith('_') or _name in ('get_connection', 'init_db')):
         continue
     setattr(SportsDB, _name,
             _cached_read(_fn) if _name.startswith('get_') else _invalidating(_fn))
+
+
+# ── Polite ESPN access ──────────────────────────────────────
+# ESPN blocks clients that burst requests (HTTP 403/429). Every request from
+# every thread goes through one throttle, and a block pauses all of them.
+_ESPN_MIN_GAP = 0.35          # seconds between requests, process-wide
+_ESPN_LOCK = threading.Lock()
+_ESPN_STATE = {'next_at': 0.0, 'blocked_until': 0.0}
+
+
+def _throttled_request(orig_request):
+    def request(method, url, *args, **kwargs):
+        for attempt in range(3):
+            with _ESPN_LOCK:
+                now = time.time()
+                wait = max(_ESPN_STATE['next_at'], _ESPN_STATE['blocked_until']) - now
+                _ESPN_STATE['next_at'] = max(now, _ESPN_STATE['next_at'],
+                                             _ESPN_STATE['blocked_until']) + _ESPN_MIN_GAP
+            if wait > 0:
+                time.sleep(wait)
+            resp = orig_request(method, url, *args, **kwargs)
+            if resp.status_code not in (403, 429):
+                return resp
+            backoff = 30 * (2 ** attempt)
+            with _ESPN_LOCK:
+                _ESPN_STATE['blocked_until'] = max(_ESPN_STATE['blocked_until'],
+                                                   time.time() + backoff)
+            logging.warning("ESPN returned %s; backing off %ss", resp.status_code, backoff)
+        return resp
+    return request
+
+
+def espn_blocked_for() -> float:
+    """Seconds until ESPN requests resume after a rate-limit back-off."""
+    return max(0.0, _ESPN_STATE['blocked_until'] - time.time())
 
 
 class ESPNWorker:
@@ -2699,6 +2751,7 @@ class ESPNWorker:
         self.db = db
         self.session = requests.Session()
         self.session.headers.update({'User-Agent': 'Mozilla/5.0 (TrulySporting Analytics)'})
+        self.session.request = _throttled_request(self.session.request)
         self.running = False
         self.thread = None
         self.last_error = ''
@@ -2747,6 +2800,10 @@ class ESPNWorker:
     def fetch_and_process(self, category: str, sport: str, endpoint_type: str,
                           force_refresh: bool = False,
                           params: Optional[Dict] = None) -> Optional[Dict]:
+        if params and 'season' in params and endpoint_type == 'scoreboard':
+            # ESPN's scoreboard ignores `season=` (always returns the current
+            # season); `dates=YYYY` selects the season.
+            params = {('dates' if k == 'season' else k): v for k, v in params.items()}
         cache_key = f"{category}_{sport}_{endpoint_type}"
         if params:
             cache_key += '_' + '_'.join(f"{k}={v}" for k, v in sorted(params.items()))
@@ -4285,36 +4342,14 @@ def _get_sport_theme(ep_key: str = '') -> dict:
 
 
 def _render_tab_banner(title: str, subtitle: str = '', ep_key: str = ''):
-    """Render a sport-context banner at the top of a tab."""
-    t = _get_sport_theme(ep_key)
-    sub_html = (
-        f'<p style="margin:3px 0 0;font-size:13px;color:{t["color"]}bb">{subtitle}</p>'
-        if subtitle else ''
-    )
-    # Football gets subtle yard-line decoration
-    deco = (
-        'repeating-linear-gradient(90deg,transparent,transparent 48px,'
-        'rgba(255,255,255,0.35) 48px,rgba(255,255,255,0.35) 50px)'
-        if t.get('field_lines') else 'none'
-    )
-    st.html(f"""
-    <div style="background:{t['gradient']};border-left:5px solid {t['accent']};
-                border-radius:0 12px 12px 0;padding:14px 22px;margin-bottom:20px;
-                position:relative;overflow:hidden">
-      <div style="position:absolute;inset:0;background:{deco};pointer-events:none;
-                  opacity:0.4"></div>
-      <div style="display:flex;align-items:center;gap:12px;position:relative">
-        <span style="font-size:32px;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.15))">
-          {t['emoji']}
-        </span>
-        <div>
-          <h2 style="margin:0;font-size:20px;font-weight:800;color:{t['color']};
-                     letter-spacing:-0.3px">{title}</h2>
-          {sub_html}
-        </div>
-      </div>
-    </div>
-    """)
+    """Compact page title. The league always comes from the header picker."""
+    ep = st.session_state.get('g_league', ep_key)
+    t = _get_sport_theme(ep)
+    st.html(
+        f'<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:2px 0 10px">'
+        f'<h2 style="margin:0;font-size:24px;font-weight:800;letter-spacing:-.5px">{t["emoji"]} {title}</h2>'
+        + (f'<span style="font-size:13px;color:#64748b">{subtitle}</span>' if subtitle else '')
+        + '</div>')
 
 
 def _render_sport_badge(ep_key: str) -> str:
@@ -4980,8 +5015,11 @@ _PAGE_IDS = {
     "🏅 Scores": 1, "📈 Team Trends": 2, "👤 Players": 3, "🏟 Teams": 4,
     "📰 News": 5, "🏆 Rankings": 6, "🌐 Network": 7, "🔬 Schema Explorer": 8,
     "🔍 Raw Inspector": 9, "📋 Custom Views": 10, "🛠 Admin Panel": 11,
-    "💚 Support": 12, "🎯 Odds": 13, "⚔️ Matchups": 14,
+    "💚 Support": 12, "🎯 Odds": 13, "⚔️ Matchups": 14, "⚙️ Settings": 15,
 }
+# Each page's own league picker; the global header picker drives them all.
+_PAGE_LEAGUE_KEYS = ['sb_ep', 'trend_ep', 'pt_ep', 'teams_ep', 'news_ep', 'r5_league',
+                     'fd_league', 'mu_league']
 # Thumb-reach bottom bar: the four most-used pages + More.
 _BOTTOM_NAV = {"🏅 Scores": "🏅 Scores", "⚔️ Games": "⚔️ Matchups", "🎯 Odds": "🎯 Odds",
                "👤 Players": "👤 Players", "🧭 More": None}
@@ -4994,8 +5032,14 @@ def _goto(page: str, **state) -> None:
     st.session_state['show_more'] = False
 
 
+def _on_top_nav() -> None:
+    choice = st.session_state.get('ts_topnav_sel')
+    if choice:
+        _goto(choice)
+
+
 def _on_bottom_nav() -> None:
-    choice = st.session_state.get('nav_bottom')
+    choice = st.session_state.get('ts_bottomnav_sel')
     if choice == '🧭 More':
         st.session_state['show_more'] = True
     elif choice in _BOTTOM_NAV:
@@ -5033,6 +5077,35 @@ def _page_slug(label: str) -> str:
 
 
 @st.cache_resource(show_spinner=False)
+def _engine_registry(app_ver: int, src_mtime: float = 0.0) -> Dict[str, Any]:
+    return {}
+
+
+def _ensure_engine(db: Any, worker: Any, ep: str, app_ver: int) -> Any:
+    """Start (once per process) the background sync for a league."""
+    reg = _engine_registry(app_ver, os.path.getmtime(__file__))
+    # One league syncs at a time so we stay well under ESPN's rate limits.
+    for other in [k for k in reg if k != ep]:
+        reg.pop(other).stop()
+    if ep not in reg:
+        reg[ep] = LeagueSync(ep, db, worker, ESPNWorker._espn_season_year,
+                             ESPNWorker._season_date_ranges).start()
+    return reg[ep]
+
+
+def _league_label(ep: str) -> str:
+    names = {
+        'football/nfl': '🏈 NFL', 'football/college-football': '🏈 College Football',
+        'basketball/nba': '🏀 NBA', 'basketball/wnba': '🏀 WNBA',
+        'basketball/mens-college-basketball': "🏀 Men's College Hoops",
+        'basketball/womens-college-basketball': "🏀 Women's College Hoops",
+        'baseball/mlb': '⚾ MLB', 'hockey/nhl': '🏒 NHL',
+        'soccer/usa.1': '⚽ MLS', 'soccer/eng.1': '⚽ Premier League',
+    }
+    return names.get(ep, ep.split('/')[-1].replace('-', ' ').title())
+
+
+@st.cache_resource(show_spinner=False)
 def _get_shared_backend(app_ver: int, src_mtime: float = 0.0) -> Dict[str, Any]:
     _db = SportsDB()
     _worker = ESPNWorker(_db)
@@ -5049,253 +5122,7 @@ def main():
         initial_sidebar_state="collapsed",
     )
 
-    st.html("""
-    <style>
-    /* ── Global typography ── */
-    html, body, [class*="css"] {
-        font-family: 'Inter', 'Segoe UI', system-ui, Arial, sans-serif;
-    }
-    .block-container { padding-top: 1rem !important; max-width: 1400px; }
-
-    /* ── Tab bar — pill style ── */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 4px; background: #f0f2f6; padding: 6px 8px;
-        border-radius: 12px; margin-bottom: 6px; flex-wrap: wrap;
-    }
-    .stTabs [data-baseweb="tab"] {
-        font-size: 13px; font-weight: 500; padding: 6px 14px;
-        border-radius: 8px; color: #555;
-        border: none !important; background: transparent !important;
-    }
-    .stTabs [aria-selected="true"] {
-        background: #ffffff !important; color: #1a1a2e !important;
-        font-weight: 700 !important; box-shadow: 0 1px 5px rgba(0,0,0,0.13) !important;
-    }
-
-    /* ── Metric cards ── */
-    [data-testid="stMetric"] {
-        background: #fff; border: 1px solid #e4e8f0; border-radius: 12px;
-        padding: 14px 18px; box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-    }
-    [data-testid="stMetricValue"] { font-size: 28px !important; font-weight: 800 !important; }
-    [data-testid="stMetricLabel"] {
-        font-size: 12px !important; font-weight: 600 !important;
-        text-transform: uppercase; letter-spacing: 0.6px; color: #777 !important;
-    }
-
-    /* ── Buttons ── */
-    .stButton > button {
-        border-radius: 9px !important; font-weight: 600 !important;
-        transition: all 0.15s ease !important; letter-spacing: 0.2px;
-    }
-    .stButton > button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.13) !important;
-    }
-    .stButton > button[kind="primary"] {
-        background: linear-gradient(135deg,#1e3a6e,#3a6abf) !important;
-        border: none !important;
-    }
-
-    /* ── Dataframes ── */
-    [data-testid="stDataFrame"] {
-        border-radius: 10px; overflow: hidden; border: 1px solid #e4e8f0;
-    }
-    [data-testid="stDataFrame"] *,
-    [data-testid="stDataFrameResizable"] * { color: #111 !important; }
-
-    /* ── Expanders ── */
-    [data-testid="stExpander"] {
-        border: 1px solid #e4e8f0 !important; border-radius: 12px !important;
-        overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.04);
-    }
-    [data-testid="stExpander"] summary p,
-    [data-testid="stExpander"] summary span,
-    [data-testid="stExpander"] p,
-    [data-testid="stExpander"] span,
-    [data-testid="stExpander"] li { color: #1a1a2e !important; }
-
-    /* ── Alert boxes — ensure text is always dark & readable ── */
-    [data-testid="stAlert"] p,
-    [data-testid="stAlert"] span,
-    [data-testid="stAlert"] li,
-    [data-baseweb="notification"] p,
-    [data-baseweb="notification"] span { color: #1a1a2e !important; }
-
-    /* ── st.info blue box ── */
-    [data-testid="stAlert"][kind="info"],
-    div[data-testid="stAlert"] { background: #eff6ff !important; }
-
-    /* ── Captions / small text ── */
-    [data-testid="stCaptionContainer"] p { color: #444 !important; }
-
-    /* ── Markdown rendered text ── */
-    .stMarkdown p, .stMarkdown li, .stMarkdown td, .stMarkdown th { color: #1a1a2e !important; }
-    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
-    .stMarkdown h4, .stMarkdown h5 { color: #111827 !important; }
-
-    /* ── Radio / checkbox labels ── */
-    [data-testid="stRadio"] label span,
-    [data-testid="stCheckbox"] label span { color: #1a1a2e !important; }
-
-    /* ── Selectbox label & number input label ── */
-    label[data-testid="stWidgetLabel"] p { color: #1a1a2e !important; }
-
-    /* ── Toggle text ── */
-    [data-testid="stToggle"] label span { color: #1a1a2e !important; }
-
-    /* ── Sidebar (dark navy) ── */
-    section[data-testid="stSidebar"] { background: #111827 !important; }
-    section[data-testid="stSidebar"] .stMarkdown,
-    section[data-testid="stSidebar"] label,
-    section[data-testid="stSidebar"] p,
-    section[data-testid="stSidebar"] span { color: #d1d5db !important; }
-    section[data-testid="stSidebar"] h1,
-    section[data-testid="stSidebar"] h2,
-    section[data-testid="stSidebar"] h3 { color: #f9fafb !important; }
-    section[data-testid="stSidebar"] .stButton > button {
-        background: #1f2d4a !important; color: #e5e7eb !important;
-        border: 1px solid #2d4070 !important;
-    }
-
-    /* ── Links ── */
-    a { color: #2563eb !important; text-decoration: none !important; }
-    a:hover { text-decoration: underline !important; }
-
-    /* ── Inputs / textareas / selects — ensure readable dark text ── */
-    [data-testid="stTextInput"] input,
-    [data-testid="stNumberInput"] input,
-    [data-testid="stTextArea"] textarea {
-        background: #ffffff !important;
-        color: #1a1a2e !important;
-        border: 1px solid #d0d5e0 !important;
-    }
-    [data-testid="stTextInput"] input::placeholder,
-    [data-testid="stTextArea"] textarea::placeholder {
-        color: #9ca3af !important;
-    }
-    /* Select / multiselect boxes */
-    [data-baseweb="select"] [data-testid="stMarkdownContainer"],
-    [data-baseweb="select"] div,
-    [data-baseweb="select"] span,
-    [data-baseweb="select"] input {
-        color: #1a1a2e !important;
-    }
-    [data-baseweb="select"] > div {
-        background: #ffffff !important;
-        border-color: #d0d5e0 !important;
-    }
-    /* Multiselect tags */
-    [data-baseweb="tag"] { background: #e8edf8 !important; }
-    [data-baseweb="tag"] span { color: #1a1a2e !important; }
-    /* Sidebar inputs stay readable on dark bg */
-    section[data-testid="stSidebar"] [data-testid="stTextInput"] input,
-    section[data-testid="stSidebar"] [data-testid="stNumberInput"] input,
-    section[data-testid="stSidebar"] [data-testid="stTextArea"] textarea {
-        background: #1f2d4a !important;
-        color: #f3f4f6 !important;
-        border-color: #2d4070 !important;
-    }
-    section[data-testid="stSidebar"] [data-baseweb="select"] > div {
-        background: #1f2d4a !important;
-        border-color: #2d4070 !important;
-    }
-    section[data-testid="stSidebar"] [data-baseweb="select"] div,
-    section[data-testid="stSidebar"] [data-baseweb="select"] span {
-        color: #f3f4f6 !important;
-    }
-    /* ── Scrollbars ── */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #f1f3f8; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb { background: #c1c6d4; border-radius: 3px; }
-    </style>
-    """)
-
-    # ── MOBILE MODE CSS OVERRIDES ─────────────────────────────
-    if st.session_state.get('ui_mode', 'desktop') == 'mobile':
-        st.html("""
-        <style>
-        /* ── Mobile: wider content, no wasted side margin ── */
-        .block-container {
-            padding-top: 0.5rem !important;
-            padding-left: 0.5rem !important;
-            padding-right: 0.5rem !important;
-            max-width: 100% !important;
-        }
-
-        /* ── Mobile: sidebar collapsed until opened (› button, top-left) ── */
-        section[data-testid="stSidebar"][aria-expanded="false"] {
-            min-width: 0 !important;
-            width: 0 !important;
-            transform: translateX(-100%) !important;
-        }
-        section[data-testid="stSidebar"][aria-expanded="true"] {
-            width: 85vw !important; min-width: 85vw !important; z-index: 1000000 !important;
-        }
-        [data-testid="stSidebarCollapseButton"] { display: flex !important; }
-
-        /* ── Mobile: larger readable font ── */
-        html, body, [class*="css"] { font-size: 16px !important; }
-        .stMarkdown p, .stMarkdown li { font-size: 15px !important; line-height: 1.7 !important; }
-        [data-testid="stCaptionContainer"] p { font-size: 13px !important; }
-
-        /* ── Mobile: larger tab labels for tap targets ── */
-        .stTabs [data-baseweb="tab"] {
-            font-size: 15px !important;
-            padding: 10px 12px !important;
-            min-height: 44px !important;
-        }
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 2px !important;
-            padding: 4px 4px !important;
-            flex-wrap: wrap !important;
-        }
-
-        /* ── Mobile: larger buttons ── */
-        .stButton > button {
-            min-height: 48px !important;
-            font-size: 15px !important;
-            padding: 10px 18px !important;
-        }
-
-        /* ── Mobile: bigger metric values ── */
-        [data-testid="stMetricValue"] { font-size: 22px !important; }
-        [data-testid="stMetric"] { padding: 12px 10px !important; }
-
-        /* ── Mobile: inputs taller for easy tap ── */
-        [data-testid="stTextInput"] input,
-        [data-testid="stNumberInput"] input {
-            min-height: 44px !important;
-            font-size: 16px !important;
-        }
-        [data-baseweb="select"] > div {
-            min-height: 44px !important;
-            font-size: 15px !important;
-        }
-
-        /* ── Mobile: dataframe font legible ── */
-        [data-testid="stDataFrame"] * { font-size: 13px !important; }
-
-        /* ── Mobile: columns stack to single column ── */
-        [data-testid="stHorizontalBlock"] {
-            flex-direction: column !important;
-        }
-        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
-            width: 100% !important;
-            flex: 1 1 100% !important;
-            min-width: 0 !important;
-        }
-
-        /* ── Mobile: expanders — larger header ── */
-        [data-testid="stExpander"] summary {
-            min-height: 48px !important;
-            font-size: 15px !important;
-        }
-
-        /* ── Mobile: selectbox label ── */
-        label[data-testid="stWidgetLabel"] p { font-size: 14px !important; }
-        </style>
-        """)
+    st.html(ui.CSS)
 
     # ── ADSENSE METHOD 2 — body-level sticky banner ──────────
     # Rendered on EVERY page state (landing, ToS, main app).
@@ -5360,14 +5187,9 @@ def main():
     if not db.get_config('admin_pin', ''):
         db.update_config('admin_pin', _ADMIN_PIN_HASH)
 
-    # ── LANDING PAGE GATE ─────────────────────────────────
-    if not st.session_state.get('app_started', False):
-        _render_landing()
-        return
-
-    # ── TERMS OF SERVICE GATE ─────────────────────────────────
+    # ── WELCOME + TERMS (one screen) ──────────────────────
     if not st.session_state.get('tos_accepted', False):
-        _render_tos()
+        ui.render_landing()
         return
 
     # ── HOURLY DONATION NUDGE ─────────────────────────────────
@@ -5381,64 +5203,59 @@ def main():
             icon="💸",
         )
 
-    # ── APP HEADER ───────────────────────────────────────────
-    _active_eps_hdr = json.loads(db.get_config('active_endpoints', '[]'))
-    _ep_hdr = _active_eps_hdr[0] if _active_eps_hdr else ''
-    _t_hdr  = _get_sport_theme(_ep_hdr)
-    _nl     = len(_active_eps_hdr)
-    _ltxt   = str(_nl) + (' leagues' if _nl != 1 else ' league') + ' active'
-    _ui_mode_now = st.session_state.get('ui_mode', 'desktop')
-    _hdr_left, _hdr_right = st.columns([5, 1])
-    with _hdr_left:
-        st.html(
-            '<div style="display:flex;align-items:center;gap:10px;'
-            'padding:8px 4px 14px;border-bottom:2px solid #e8edf5;margin-bottom:4px">'
-            '<span style="font-size:26px">' + _t_hdr['emoji'] + '</span>'
-            '<div>'
-            '<div style="font-size:21px;font-weight:800;color:#1a1a2e;letter-spacing:-0.3px">'
-            'TrulySporting Analytics</div>'
-            '<div style="font-size:11px;color:#888">Live ESPN data · ' + _ltxt + ' · Information Triage</div>'
-            '</div></div>'
-        )
-    with _hdr_right:
-        st.write('')
-        _mode_label = '📱 Mobile' if _ui_mode_now == 'desktop' else '🖥️ Desktop'
-        _mode_tip   = 'Switch to Mobile layout' if _ui_mode_now == 'desktop' else 'Switch to Desktop layout'
-        if st.button(_mode_label, key='hdr_mode_toggle', help=_mode_tip, use_container_width=True):
-            st.session_state['ui_mode'] = 'mobile' if _ui_mode_now == 'desktop' else 'desktop'
-            st.rerun()
+    # ── HEADER: brand · global league · live sync status ────
+    _all_eps_g = EndpointRegistry.get_all_keys()
+    _active_g = [e for e in json.loads(db.get_config('active_endpoints', '[]')) if e in _all_eps_g]
+    if not _active_g:
+        _active_g = [e for e in ('football/nfl', 'basketball/nba', 'baseball/mlb', 'hockey/nhl',
+                                 'football/college-football') if e in _all_eps_g] or _all_eps_g[:5]
+        db.update_config('active_endpoints', json.dumps(_active_g))
+    if st.session_state.get('g_league') not in _active_g:
+        st.session_state['g_league'] = _active_g[0]
+    _engine = _ensure_engine(db, worker, st.session_state['g_league'], _APP_VER)
 
+    @st.fragment(run_every=5)
+    def _sync_chip():
+        _eng = _ensure_engine(db, worker, st.session_state.get('g_league', _active_g[0]), _APP_VER)
+        _blk = espn_blocked_for()
+        _txt = (f'⏸ ESPN asked us to slow down — resuming in {int(_blk)}s' if _blk else
+                describe_sync(_eng.status, lambda y: ESPNWorker._season_label(_eng.cat, y)))
+        st.html(f'<span class="ts-chip">{_txt}</span>')
 
-    # ── NAVIGATION ────────────────────────────────────────────
+    g_league = ui.render_header(_active_g, _league_label, _sync_chip)
+
+    # Drive every page's league picker from the header and hide the duplicates.
+    _odds_ok = g_league in (set(ODDS_SPORT_MAP) | set(KALSHI_SERIES))
+    _mu_ok = g_league in MATCHUP_LEAGUES
+    _hide = []
+    for _k in _PAGE_LEAGUE_KEYS:
+        if (_k == 'fd_league' and not _odds_ok) or (_k == 'mu_league' and not _mu_ok):
+            continue
+        st.session_state[_k] = g_league
+        _hide.append(f'.st-key-{_k}')
+    st.html('<style>' + ', '.join(_hide) + ' { display: none !important; }</style>')
+
+    # ── NAVIGATION: pill tabs (desktop) + bottom bar (phones) ─
     _is_admin = st.session_state.get('admin_authed', False)
-    _nav_opts = _PUBLIC_PAGES + (_ADMIN_PAGES if _is_admin else []) + ['💚 Support']
+    _nav_opts = (_PUBLIC_PAGES + (_ADMIN_PAGES if _is_admin else [])
+                 + ['⚙️ Settings', '💚 Support'])
     _qp_page = st.query_params.get('page')
     if 'nav_page' not in st.session_state:
         st.session_state['nav_page'] = next(
             (p for p in _nav_opts if _page_slug(p) == _qp_page), _nav_opts[0])
     if st.session_state['nav_page'] not in _nav_opts:
         st.session_state['nav_page'] = _nav_opts[0]
-    with st.sidebar:
-        _nav_page = st.radio('Navigate', _nav_opts, key='nav_page',
-                             label_visibility='collapsed',
-                             on_change=lambda: st.session_state.update(show_more=False))
-        st.divider()
+    _nav_page = st.session_state['nav_page']
     st.query_params['page'] = _page_slug(_nav_page)
+    ui.render_nav([p for p in _nav_opts if p != '💚 Support'], _BOTTOM_NAV,
+                  None if st.session_state.get('show_more') else _nav_page,
+                  _on_top_nav, _on_bottom_nav)
+    _page = 0 if st.session_state.get('show_more') else _PAGE_IDS.get(_nav_page, 1)
 
-    # Bottom bar: always on phones; on wide screens only in Mobile mode.
-    _mobile_mode = st.session_state.get('ui_mode', 'desktop') == 'mobile'
-    _bn_disp, _bn_pad = ('block', '96px') if _mobile_mode else ('none', '1rem')
-    st.html(_BOTTOM_NAV_CSS.replace('__DISPLAY__', _bn_disp).replace('__PAD__', _bn_pad))
-    _bn_current = ('🧭 More' if st.session_state.get('show_more') else
-                   next((k for k, v in _BOTTOM_NAV.items() if v == _nav_page), None))
-    st.session_state['nav_bottom'] = _bn_current
-    with st.container(key='bottom_nav'):
-        st.segmented_control('Pages', list(_BOTTOM_NAV), key='nav_bottom',
-                             on_change=_on_bottom_nav, label_visibility='collapsed')
-
-    # ── SIDEBAR ───────────────────────────────────────────────
-    with st.sidebar:
-        st.html('<div style="padding:4px 0 10px;font-size:17px;font-weight:800;color:#f9fafb">⚙️ Configuration</div>')
+    # ── SETTINGS PAGE (was the sidebar) ───────────────────────
+    if _page == 15:
+        st.subheader("⚙️ Settings")
+        st.caption("Pick which leagues appear in the league menu at the top.")
 
         all_eps = EndpointRegistry.get_all_keys()
         current_active = json.loads(db.get_config('active_endpoints', '[]'))
@@ -5501,8 +5318,8 @@ def main():
             'font-weight:700;font-size:13px;text-decoration:none;margin-bottom:8px">'
             '💸 Support the Project</a>'
         )
-        if st.button('🏠 Back to Home', help='Return to landing page'):
-            st.session_state['app_started'] = False
+        if st.button('🏠 Back to welcome screen'):
+            st.session_state['tos_accepted'] = False
             st.rerun()
 
     # ── How-It-Works expander placed at the top of every tab ──────────────────
@@ -5706,17 +5523,14 @@ def main():
 
     # ── TABS ──────────────────────────────────────────────────
     # Only the selected page runs on each rerun (st.tabs executed all 12).
-    _page = _PAGE_IDS.get(_nav_page, 1)
     if st.session_state.get('show_more'):
-        _page = 0
         st.markdown('### Where to?')
         _more = [p for p in _nav_opts if p not in _BOTTOM_NAV.values()]
         _mc = st.columns(2)
         for _i, _p in enumerate(_more):
             _mc[_i % 2].button(_p, key=f'more_{_i}', use_container_width=True,
                                on_click=_goto, args=(_p,))
-        st.caption('Tip: the bar at the bottom always gets you back to Scores, Games, Odds and Players. '
-                   'Leagues & settings live in the side menu — tap **›** at the top-left.')
+        st.caption('Tip: change the league from the menu at the top of any page.')
 
     # ── TAB 1: SCOREBOARD ─────────────────────────────────────
     if _page == 1:
@@ -5767,19 +5581,8 @@ def main():
                     label_visibility="collapsed"
                 )
 
-            # ── Auto-load: whole season (once / 12h), current slate (every 2 min) ─
-            _sb_full_key = f'season_loaded_{cat}_{sport}_{sb_season}'
-            _sb_full_ts = float(db.get_config(_sb_full_key, '0') or 0)
-            if time.time() - _sb_full_ts > 12 * 3600:
-                _chunks = ESPNWorker._season_date_ranges(cat, sport, sb_season)
-                _prog = st.progress(0, text=f"Loading the {_sb_season_lbl} season…")
-                for _ci, (_lbl, _prms) in enumerate(_chunks):
-                    _prog.progress((_ci + 1) / len(_chunks),
-                                   text=f"Loading {_lbl} ({_ci + 1}/{len(_chunks)})…")
-                    worker.fetch_and_process(cat, sport, 'scoreboard',
-                                             force_refresh=True, params=_prms)
-                _prog.empty()
-                db.update_config(_sb_full_key, str(time.time()))
+            # ── Auto-load: the league engine syncs whole seasons in the background;
+            #    here we only keep the current slate fresh (every 2 min). ─
             _auto_fresh(f'sb_live_{cat}_{sport}', 120, "Updating scores…",
                         lambda: (worker.fetch_and_process(cat, sport, 'scoreboard',
                                                           force_refresh=True),
@@ -6383,6 +6186,12 @@ def main():
                     _pgs_live  = db.get_player_game_log(
                         _pt_sport_key, _pt_sel_player, str(_pt_player_id)
                     )
+                    # Only the selected season's games.
+                    if not _pgs_live.empty:
+                        _pt_lo, _pt_hi = SportsDB.season_bounds(_pt_cat, _pt_season)
+                        _pt_dt = _pgs_live['event_date'].fillna('').where(
+                            _pgs_live['event_date'].fillna('') != '', _pgs_live['game_date'].fillna(''))
+                        _pgs_live = _pgs_live[(_pt_dt >= _pt_lo) & (_pt_dt <= _pt_hi)]
                     _pbp_live  = db.get_player_pbp_mentions(_pt_sport_key, _pt_sel_player)
                     _roster_bio = _pt_player_row.iloc[0].to_dict() if not _pt_player_row.empty else {}
 
@@ -9724,6 +9533,13 @@ def main():
 
     if _page == 13:
         render_odds_page(db)
+
+    if _page == 15:
+        st.divider()
+        st.markdown("#### 🔐 Admin")
+        if _render_admin_gate('settings_admin'):
+            st.success("Admin tools unlocked — Network, Schema Explorer, Raw Inspector "
+                       "and Admin Panel are now in the page menu.")
 
     if _page == 14:
         render_matchups_page(db, worker, ESPNWorker._espn_season_year,
