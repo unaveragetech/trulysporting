@@ -414,6 +414,14 @@ def _compare_teams(db, worker, ep, season, ensure_box, goto,
                         else:
                             st.caption('—')
 
+    # PrizePicks lines vs our projections (fetched only when asked: costs credits).
+    st.markdown('**🟣 PrizePicks props**')
+    from prizepicks_props import render_prizepicks
+    render_prizepicks(db, ep, h_name, a_name,
+                      [(a_abbr, (fh.get('pa', 0) / lg_pa) if lg_pa else 1.0),
+                       (h_abbr, (fa.get('pa', 0) / lg_pa) if lg_pa else 1.0)],
+                      player_projections, key_suffix=f'_{a_id}_{h_id}')
+
     inj_rows = [{'Team': abbr, 'Player': p['name'], 'Pos': p['pos'], 'Status': p['status'],
                  'Share of production': f"{p['share']:.0%}" if p['share'] else '—'}
                 for abbr, inj in ((a_abbr, ia), (h_abbr, ih)) for p in inj['players'][:8]]

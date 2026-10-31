@@ -252,6 +252,17 @@ def render_odds_page(db) -> None:
                'rates the home team than the sportsbook no-vig price. Big gaps can flag value '
                '— or a stale line.')
 
+    # ── PrizePicks player props for one game ──
+    st.markdown('#### 🟣 PrizePicks player props')
+    from matchups import player_projections
+    from prizepicks_props import render_prizepicks
+    _opts = {f"{r.away_abbr} @ {r.home_abbr}": r for r in games.itertuples()}
+    _pick = st.selectbox('Game', list(_opts), key='pp_game')
+    _g = _opts[_pick]
+    render_prizepicks(db, ep_key, _g.home_team, _g.away_team,
+                      [(_g.away_abbr, 1.0), (_g.home_abbr, 1.0)], player_projections,
+                      key_suffix='_odds')
+
     fd_games = games[games['fd_game_id'].notna()]
     if fd_games.empty:
         return
