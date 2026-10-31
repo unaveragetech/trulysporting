@@ -449,7 +449,8 @@ def render_matchups_page(db: Any, worker: Any, season_for: Callable[[str], int],
     season = season_for(cat)
 
     with st.spinner('Crunching team form…'):
-        games, err = build_slate(db, worker, ep, season)
+        games, err = build_slate(db, worker, ep, season,
+                                 include_fd=st.session_state.get('fd_on', False))
     if err:
         st.error(f'ESPN: {err}')
     if games.empty:
