@@ -30,12 +30,68 @@ ODDS_SPORT_MAP: Dict[str, str] = {
 MARKET_LABELS = {'h2h': 'Moneyline', 'spreads': 'Spread', 'totals': 'Total'}
 
 
-def _api_key() -> str:
+_KEY_NAMES = ('odds_api_key', 'the_odds_api_key', 'oddsapi_key', 'odds_key')
+
+
+def _clean(v) -> str:
+    return str(v or '').strip().strip('"').strip("'").strip()
+
+
+def _secrets_file_problem() -> str:
+    """Streamlit reports a malformed secrets.toml as 'no secrets'; parse it
+    ourselves to give the real reason."""
     try:
-        key = st.secrets.get('ODDS_API_KEY', '')
-    except Exception:
-        key = ''
-    return key or os.environ.get('ODDS_API_KEY', '')
+        import tomllib  # Python 3.11+
+    except ImportError:
+        return ''
+    for path in (os.path.join('.streamlit', 'secrets.toml'),
+                 os.path.join(os.path.expanduser('~'), '.streamlit', 'secrets.toml')):
+        if os.path.isfile(path):
+            try:
+                with open(path, 'rb') as f:
+                    tomllib.load(f)
+            except Exception as e:
+                return (f'{path} is not valid TOML ({e}). Values must be quoted, '
+                        'e.g. ODDS_API_KEY = "abc123".')
+    return ''
+
+
+def find_api_key() -> dict:
+    """Locate the Odds API key and explain where it came from (or why not).
+
+    Checks, in order: st.secrets at the root (any capitalisation), st.secrets
+    inside any [section] (e.g. [odds] api_key = ...), then environment
+    variables. Returns {'key', 'source', 'problems'} — never logs the value."""
+    problems = []
+    try:
+        secrets = dict(st.secrets)
+    except FileNotFoundError:
+        secrets = {}
+        problems.append(_secrets_file_problem() or 'No secrets are configured (st.secrets is empty).')
+    except Exception as e:  # malformed TOML, e.g. a value without quotes
+        secrets = {}
+        problems.append(f'Secrets could not be parsed as TOML: {type(e).__name__}: {e}. '
+                        'Values must be quoted, e.g. ODDS_API_KEY = "abc123".')
+    for k, v in secrets.items():
+        if k.lower() in _KEY_NAMES and isinstance(v, str) and _clean(v):
+            return {'key': _clean(v), 'source': f'st.secrets["{k}"]', 'problems': problems}
+    for sec, tbl in secrets.items():
+        if hasattr(tbl, 'items'):
+            for k, v in dict(tbl).items():
+                if (k.lower() in _KEY_NAMES or (k.lower() == 'api_key' and 'odds' in sec.lower()))                         and _clean(v):
+                    return {'key': _clean(v), 'source': f'st.secrets["{sec}"]["{k}"]',
+                            'problems': problems}
+    for k, v in os.environ.items():
+        if k.lower() in _KEY_NAMES and _clean(v):
+            return {'key': _clean(v), 'source': f'environment variable {k}', 'problems': problems}
+    if secrets:
+        problems.append('Secrets loaded, but none is named ODDS_API_KEY. Found: '
+                        + ', '.join(sorted(secrets)) + '.')
+    return {'key': '', 'source': '', 'problems': problems}
+
+
+def _api_key() -> str:
+    return find_api_key()['key']
 
 
 def american_to_prob(price: Optional[float]) -> Optional[float]:
