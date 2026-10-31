@@ -8,6 +8,7 @@ refreshes itself every 20 seconds.
 """
 import json
 import math
+import re
 import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -207,6 +208,149 @@ def box_tables(summary: Dict) -> Dict[str, Dict[str, pd.DataFrame]]:
     return out
 
 
+def team_stat_rows(summary: Dict) -> List[tuple]:
+    """[(label, away_display, home_display, away_num, home_num)] from the live box score."""
+    teams = (summary.get('boxscore') or {}).get('teams') or []
+    if len(teams) != 2:
+        return []
+    by_side = {}
+    for t in teams:
+        side = t.get('homeAway') or ('home' if t is teams[1] else 'away')
+        by_side[side] = {x.get('label') or x.get('name'): x.get('displayValue', '')
+                         for x in t.get('statistics', [])}
+    away, home = by_side.get('away', {}), by_side.get('home', {})
+    rows = []
+    for lbl in away:
+        if lbl not in home:
+            continue
+        a, h = str(away[lbl]), str(home[lbl])
+        def n(v):
+            try:
+                return float(re.split(r'[-/:]', v.replace(',', ''))[0].rstrip('%'))
+            except ValueError:
+                return None
+        rows.append((lbl, a, h, n(a), n(h)))
+    return rows
+
+
+def momentum(summary: Dict, last_n: int = 20) -> Optional[tuple]:
+    """(away_pts, home_pts, plays) scored over the last N plays with a score."""
+    plays = summary.get('plays') or []
+    if not plays:
+        for d in ((summary.get('drives') or {}).get('previous') or [])[-4:]:
+            plays += d.get('plays', [])
+    scored = [p for p in plays if p.get('awayScore') is not None and p.get('homeScore') is not None]
+    if len(scored) < 2:
+        return None
+    window = scored[-last_n:]
+    first, last = window[0], window[-1]
+    return (int(last['awayScore']) - int(first['awayScore']),
+            int(last['homeScore']) - int(first['homeScore']), len(window))
+
+
+def line_score(summary: Dict) -> Optional[pd.DataFrame]:
+    comps = ((summary.get('header') or {}).get('competitions') or [{}])[0].get('competitors', [])
+    rows = {}
+    for c in comps:
+        ls = [x.get('displayValue', '') for x in c.get('linescores') or []]
+        if ls:
+            rows[c.get('team', {}).get('abbreviation', c.get('homeAway', ''))] = ls + [c.get('score', '')]
+    if len(rows) != 2:
+        return None
+    n = max(len(v) for v in rows.values()) - 1
+    return pd.DataFrame(rows, index=[str(i + 1) for i in range(n)] + ['T']).T
+
+
+def _stat_bars(rows: List[tuple], away: str, home: str) -> str:
+    html = (f'<div style="display:flex;justify-content:space-between;font-size:12px;'
+            f'font-weight:700;color:#475569;margin:4px 0 6px"><span>{away}</span><span>{home}</span></div>')
+    for lbl, a, h, an, hn in rows:
+        if an is None or hn is None or (an + hn) <= 0:
+            continue
+        pa = 100 * an / (an + hn)
+        html += (f'<div style="margin:6px 0"><div style="display:flex;justify-content:space-between;'
+                 f'font-size:12px"><b>{a}</b><span style="color:#64748b">{lbl}</span><b>{h}</b></div>'
+                 f'<div style="display:flex;height:6px;border-radius:4px;overflow:hidden;background:#e2e8f0">'
+                 f'<div style="width:{pa:.0f}%;background:#94a3b8"></div>'
+                 f'<div style="width:{100 - pa:.0f}%;background:#2563eb"></div></div></div>')
+    return html
+
+
+# Every ESPN team-sport league we scan for the all-ESPN board.
+ALL_ESPN_LEAGUES = [
+    'football/nfl', 'football/college-football', 'football/ufl',
+    'basketball/nba', 'basketball/wnba', 'basketball/mens-college-basketball',
+    'basketball/womens-college-basketball', 'basketball/nba-development',
+    'baseball/mlb', 'baseball/college-baseball', 'hockey/nhl',
+    'hockey/mens-college-hockey', 'soccer/usa.1', 'soccer/eng.1', 'soccer/esp.1',
+    'soccer/ger.1', 'soccer/ita.1', 'soccer/fra.1', 'soccer/uefa.champions',
+    'soccer/uefa.europa', 'soccer/mex.1', 'soccer/usa.nwsl', 'soccer/eng.2',
+]
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_board(ep: str) -> pd.DataFrame:
+    """Live and upcoming (next 24h) games for one league."""
+    try:
+        events = _get(SCOREBOARD.format(ep=ep)).get('events', [])
+    except Exception:
+        return pd.DataFrame()
+    now = pd.Timestamp.utcnow()
+    rows = []
+    for ev in events:
+        comp = (ev.get('competitions') or [{}])[0]
+        state = comp.get('status', {}).get('type', {}).get('state')
+        start = pd.to_datetime(ev.get('date'), utc=True, errors='coerce')
+        if state == 'post' or (state == 'pre' and (start is pd.NaT or start - now > pd.Timedelta('24h'))):
+            continue
+        t = {c.get('homeAway'): c for c in comp.get('competitors', [])}
+        h, a = t.get('home', {}), t.get('away', {})
+        tv = ', '.join(b.get('media', {}).get('shortName', '') for b in comp.get('broadcasts', [])
+                       if b.get('media', {}).get('shortName')) or ', '.join(
+            n for b in comp.get('broadcasts', []) for n in b.get('names', []))
+        rows.append({'ep': ep, 'state': state, 'start': start,
+                     'detail': comp.get('status', {}).get('type', {}).get('shortDetail', ''),
+                     'away': a.get('team', {}).get('displayName', ''),
+                     'home': h.get('team', {}).get('displayName', ''),
+                     'away_score': a.get('score', ''), 'home_score': h.get('score', ''),
+                     'tv': tv})
+    return pd.DataFrame(rows)
+
+
+def render_all_espn(label: Callable[[str], str]) -> None:
+    @st.fragment(run_every=60)
+    def _board():
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            frames = list(pool.map(fetch_board, ALL_ESPN_LEAGUES))
+        frames = [f for f in frames if not f.empty]
+        stamp = datetime.now().strftime('%I:%M %p')
+        if not frames:
+            st.info(f'Nothing live or starting in the next 24 hours across ESPN ({stamp}).')
+            return
+        allg = pd.concat(frames, ignore_index=True)
+        n_live = int((allg['state'] == 'in').sum())
+        n_pre = int((allg['state'] == 'pre').sum())
+        st.caption(f'{n_live} live · {n_pre} starting in the next 24h · '
+                   f'{len(ALL_ESPN_LEAGUES)} ESPN leagues scanned · updated {stamp}')
+        tz = datetime.now().astimezone().tzinfo
+        allg['sort'] = allg['state'].map({'in': 0, 'pre': 1})
+        for ep, grp in sorted(allg.groupby('ep'), key=lambda x: (x[1]['sort'].min(), -len(x[1]))):
+            live_n = int((grp['state'] == 'in').sum())
+            with st.expander(f"{label(ep)} — {live_n} live · {len(grp) - live_n} upcoming",
+                             expanded=live_n > 0):
+                grp = grp.sort_values(['sort', 'start'])
+                st.dataframe(pd.DataFrame({
+                    'Status': ['🔴 ' + d if s == 'in' else '🕒 ' + st_.tz_convert(tz).strftime('%a %I:%M %p')
+                               for s, d, st_ in zip(grp['state'], grp['detail'], grp['start'])],
+                    'Away': grp['away'],
+                    'Score': [f'{a}–{h}' if s == 'in' else '' for s, a, h in
+                              zip(grp['state'], grp['away_score'], grp['home_score'])],
+                    'Home': grp['home'], 'TV': grp['tv']}),
+                    hide_index=True, use_container_width=True)
+    _board()
+
+
 def win_prob_series(summary: Dict) -> List[float]:
     return [w.get('homeWinPercentage', 0.5) for w in (summary.get('winprobability') or [])]
 
@@ -263,7 +407,20 @@ def _live_game_card(db, worker, g, season: int, kalshi_home: Optional[float]) ->
         if g.last_play:
             st.markdown(f"**Last play:** {g.last_play}")
 
-        with st.expander('📈 Win probability · ▶ play-by-play · 📊 box score'):
+        mo = momentum(summ)
+        if mo and (mo[0] or mo[1]):
+            lead = g.home_abbr if mo[1] > mo[0] else g.away_abbr
+            st.caption(f"⚡ Momentum (last {mo[2]} plays): {g.away_abbr} {mo[0]} – {mo[1]} "
+                       f"{g.home_abbr}" + (f" · {lead} on a run" if abs(mo[1] - mo[0]) >= 7 else ''))
+
+        with st.expander('📊 Team analytics · 📈 win probability · ▶ play-by-play · box score'):
+            ls = line_score(summ)
+            if ls is not None:
+                st.dataframe(ls, use_container_width=True)
+            trows = team_stat_rows(summ)
+            if trows:
+                st.markdown('**Team stats**')
+                st.html(_stat_bars(trows, g.away_abbr, g.home_abbr))
             if len(wp) > 1:
                 fig = go.Figure(go.Scatter(y=[p * 100 for p in wp], mode='lines',
                                            line=dict(color='#2563eb', width=2), fill='tozeroy',
@@ -297,7 +454,13 @@ def render_live_now(db: Any, worker: Any, leagues: List[str],
                     season_for: Callable[[str], int], label: Callable[[str], str]) -> None:
     @st.fragment(run_every=REFRESH_SECONDS)
     def _feed():
-        frames = [fetch_live_games(ep) for ep in leagues]
+        # Your leagues, plus any other ESPN league that has a game live right now.
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            boards = dict(zip(ALL_ESPN_LEAGUES, pool.map(fetch_board, ALL_ESPN_LEAGUES)))
+        extra = [ep for ep, b in boards.items()
+                 if ep not in leagues and not b.empty and (b['state'] == 'in').any()]
+        frames = [fetch_live_games(ep) for ep in list(leagues) + extra]
         live = pd.concat([f for f in frames if not f.empty], ignore_index=True) \
             if any(not f.empty for f in frames) else pd.DataFrame()
         stamp = datetime.now().strftime('%I:%M:%S %p')
@@ -457,9 +620,12 @@ def render_live_page(db: Any, worker: Any, leagues: List[str], g_league: str,
                      season_for: Callable[[str], int], label: Callable[[str], str]) -> None:
     st.markdown('## 🔴 Live & Best Bets')
     # A toggle, not st.tabs: tabs run every tab's code, and pricing the slate is slow.
-    view = st.segmented_control('View', ['🔴 Live now', '💡 Best bets'], key='live_view',
-                                default='🔴 Live now', label_visibility='collapsed')
-    if view != '💡 Best bets':
+    view = st.segmented_control('View', ['🔴 Live now', '📡 All of ESPN', '💡 Best bets'],
+                                key='live_view', default='🔴 Live now',
+                                label_visibility='collapsed')
+    if view == '📡 All of ESPN':
+        render_all_espn(label)
+    elif view != '💡 Best bets':
         render_live_now(db, worker, leagues, season_for, label)
     else:
         if g_league in _HFA:

@@ -20,6 +20,7 @@ from odds_page import render_odds_page
 from matchups import render_matchups_page
 import ui
 from live import render_live_page
+from player_insights import render_player_insights
 import matchups as _mu
 from backtest import (apply_shrink, fit_shrink, load_games, render_backtest_page,
                       run_backtest, save_model_settings,
@@ -5142,6 +5143,12 @@ def _league_label(ep: str) -> str:
         'basketball/womens-college-basketball': "🏀 Women's College Hoops",
         'baseball/mlb': '⚾ MLB', 'hockey/nhl': '🏒 NHL',
         'soccer/usa.1': '⚽ MLS', 'soccer/eng.1': '⚽ Premier League',
+        'football/ufl': '🏈 UFL', 'basketball/nba-development': '🏀 G League',
+        'baseball/college-baseball': '⚾ College Baseball',
+        'hockey/mens-college-hockey': '🏒 College Hockey', 'soccer/esp.1': '⚽ La Liga',
+        'soccer/ger.1': '⚽ Bundesliga', 'soccer/ita.1': '⚽ Serie A', 'soccer/fra.1': '⚽ Ligue 1',
+        'soccer/uefa.champions': '⚽ Champions League', 'soccer/uefa.europa': '⚽ Europa League',
+        'soccer/mex.1': '⚽ Liga MX', 'soccer/usa.nwsl': '⚽ NWSL', 'soccer/eng.2': '⚽ Championship',
     }
     return names.get(ep, ep.split('/')[-1].replace('-', ' ').title())
 
@@ -6327,12 +6334,20 @@ def main():
                     st.divider()
 
                     # ── Sub-tabs — all data sourced from local DB ──
-                    _ptsub1, _ptsub2, _ptsub3, _ptsub4 = st.tabs([
+                    _ptsub0, _ptsub1, _ptsub2, _ptsub3, _ptsub4 = st.tabs([
+                        "💡 Insights",
                         "📊 Stats",
                         "📅 Game Log",
                         "📈 Charts",
                         "🎯 PBP",
                     ])
+
+                    # ══ SUB-TAB 0: INSIGHTS (ESPN game log, any player) ══
+                    with _ptsub0:
+                        render_player_insights(
+                            _pt_sport_key, str(_pt_player_id), _pt_season,
+                            lambda y, _c=_pt_cat: ESPNWorker._season_label(_c, y),
+                            _pt_sel_player)
 
                     # ══ SUB-TAB 1: STATS ═══════════════════════════
                     with _ptsub1:
