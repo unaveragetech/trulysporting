@@ -9590,6 +9590,21 @@ def main():
 
     if _page == 15:
         st.divider()
+        st.markdown("#### 🔑 Odds API key")
+        from fanduel_odds import find_api_key
+        _kf = find_api_key()
+        if _kf['key']:
+            st.success(f"Key found in {_kf['source']} (ends …{_kf['key'][-4:]}).")
+        else:
+            st.error("No Odds API key found.")
+            for _pr in _kf['problems']:
+                st.caption(f"• {_pr}")
+            st.markdown("On Streamlit Cloud open **App → Settings → Secrets** and add this "
+                        "line at the very top (above any `[section]`), with the quotes:")
+            st.code('ODDS_API_KEY = "your_key_here"', language='toml')
+            st.caption("Save, then wait ~1 minute or reboot the app. Locally, the same line "
+                       "goes in .streamlit/secrets.toml.")
+
         st.markdown("#### 💳 Odds API credits")
         from odds_budget import set_daily_cap, usage as _odds_usage
         _u = _odds_usage()
