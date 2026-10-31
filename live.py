@@ -562,7 +562,8 @@ def _bet_table(df: pd.DataFrame) -> pd.DataFrame:
 def render_best_bets(db: Any, worker: Any, ep: str, season: int, label: Callable[[str], str]) -> None:
     st.caption(f'{label(ep)} · upcoming games · market-anchored model vs every line we can see.')
     with st.spinner('Pricing the slate…'):
-        games, err = build_slate(db, worker, ep, season)
+        games, err = build_slate(db, worker, ep, season,
+                                 include_fd=st.session_state.get('fd_on', False))
     if err:
         st.warning(f'ESPN: {err}')
     if games.empty:

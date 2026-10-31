@@ -10,7 +10,6 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
-import requests
 import streamlit as st
 
 ODDS_API_URL = "https://api.the-odds-api.com/v4/sports/{sport}/odds"
@@ -57,25 +56,21 @@ def _init_table(db_name: str) -> None:
     con.close()
 
 
-@st.cache_data(ttl=300, show_spinner="Fetching FanDuel lines…")
+FD_TTL = 1800  # 30 min — moneylines rarely move enough to matter faster
+
+
 def fetch_fanduel_odds(odds_sport: str, api_key: str) -> Tuple[List[Dict], str, str]:
-    """Returns (events, error, requests_remaining). Cached 5 min to save quota."""
-    try:
-        resp = requests.get(
-            ODDS_API_URL.format(sport=odds_sport),
-            params={'apiKey': api_key, 'regions': 'us', 'bookmakers': 'fanduel',
-                    'markets': 'h2h,spreads,totals', 'oddsFormat': 'american'},
-            timeout=15,
-        )
-        remaining = resp.headers.get('x-requests-remaining', '?')
-        if resp.status_code == 401:
-            return [], 'Invalid ODDS_API_KEY.', remaining
-        if resp.status_code == 422:
-            return [], 'This league is not offered by The Odds API right now.', remaining
-        resp.raise_for_status()
-        return resp.json(), '', remaining
-    except Exception as e:
-        return [], str(e), '?'
+    """FanDuel moneylines for a league. Returns (events, error, credits_remaining).
+
+    Costs 1 credit (h2h only; ESPN already supplies spreads/totals), cached
+    30 min in SQLite for every visitor, and refused when over the budget."""
+    from odds_budget import cached_get, usage
+    body, err = cached_get(
+        ODDS_API_URL.format(sport=odds_sport),
+        {'apiKey': api_key, 'regions': 'us', 'bookmakers': 'fanduel',
+         'markets': 'h2h', 'oddsFormat': 'american'},
+        cost=1, ttl=FD_TTL, cache_key=f'fd_h2h_{odds_sport}')
+    return (body or []), err, usage()['remaining']
 
 
 def events_to_df(events: List[Dict]) -> pd.DataFrame:

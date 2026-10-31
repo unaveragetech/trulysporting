@@ -13,7 +13,6 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
-import requests
 import streamlit as st
 
 from fanduel_odds import ODDS_SPORT_MAP, _api_key
@@ -56,35 +55,29 @@ def _norm(name: str) -> str:
     return re.sub(r'[^a-z]', '', s)
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+PROPS_TTL = 1800  # 30 min
+
+
 def fetch_events(sport: str, key: str) -> List[Dict]:
-    """Upcoming events (free endpoint — costs no credits)."""
-    try:
-        r = requests.get(EVENTS_URL.format(sport=sport), params={'apiKey': key}, timeout=15)
-        r.raise_for_status()
-        return r.json()
-    except Exception:
-        return []
+    """Upcoming events (free endpoint), cached 6h."""
+    from odds_budget import cached_get
+    body, _ = cached_get(EVENTS_URL.format(sport=sport), {'apiKey': key}, cost=0,
+                         ttl=6 * 3600, cache_key=f'events_{sport}')
+    return body or []
 
 
-@st.cache_data(ttl=900, show_spinner=False)
 def fetch_props(sport: str, event_id: str, markets: Tuple[str, ...], key: str) -> Tuple[List[Dict], str, str]:
-    """PrizePicks props for one event. Returns (rows, error, credits_remaining)."""
-    try:
-        r = requests.get(EVENT_ODDS_URL.format(sport=sport, event=event_id), timeout=15, params={
-            'apiKey': key, 'regions': 'us_dfs', 'bookmakers': 'prizepicks',
-            'markets': ','.join(markets), 'oddsFormat': 'american'})
-        remaining = r.headers.get('x-requests-remaining', '?')
-        if r.status_code == 401:
-            return [], 'Invalid ODDS_API_KEY.', remaining
-        if r.status_code == 422:
-            return [], 'PrizePicks props are not offered for this game.', remaining
-        r.raise_for_status()
-        data = r.json()
-    except Exception as e:
-        return [], str(e), '?'
+    """PrizePicks props for one event: 1 credit per market, cached 30 min in
+    SQLite (shared, survives restarts). Returns (rows, error, credits_left)."""
+    from odds_budget import cached_get, usage
+    data, err = cached_get(
+        EVENT_ODDS_URL.format(sport=sport, event=event_id),
+        {'apiKey': key, 'regions': 'us_dfs', 'bookmakers': 'prizepicks',
+         'markets': ','.join(markets), 'oddsFormat': 'american'},
+        cost=len(markets), ttl=PROPS_TTL,
+        cache_key=f'pp_{event_id}_{",".join(sorted(markets))}')
     rows = []
-    for bk in data.get('bookmakers', []):
+    for bk in (data or {}).get('bookmakers', []):
         if bk.get('key') != 'prizepicks':
             continue
         for mk in bk.get('markets', []):
@@ -93,7 +86,7 @@ def fetch_props(sport: str, event_id: str, markets: Tuple[str, ...], key: str) -
                     continue  # one row per player line (Over side carries it)
                 rows.append({'market': mk['key'], 'player': oc.get('description', ''),
                              'line': float(oc['point'])})
-    return rows, '', remaining
+    return rows, err, usage()['remaining']
 
 
 def find_event(events: List[Dict], home: str, away: str) -> Optional[Dict]:
@@ -203,12 +196,19 @@ def render_prizepicks(db: Any, ep: str, home_team: str, away_team: str,
         st.info('Add a free `ODDS_API_KEY` (the-odds-api.com) to `.streamlit/secrets.toml` to '
                 'pull PrizePicks player props.')
         return
-    markets = tuple(MARKETS[cat])
     load_key = f'pp_load_{ep}_{home_team}_{away_team}{key_suffix}'
+    names = {k: v[2] for k, v in MARKETS[cat].items()}
+    # Default to the two most-used props; each extra market costs 1 credit.
+    chosen = st.multiselect('Props to load (1 credit each, cached 30 min for everyone)',
+                            list(names), default=list(names)[:2], format_func=names.get,
+                            key=f'{load_key}_m')
+    markets = tuple(chosen)
+    if not markets:
+        return
     if not st.session_state.get(load_key):
-        st.caption(f'Loading props uses up to {len(markets)} of your monthly Odds API credits '
-                   f'for this game (cached 15 min).')
-        if st.toggle('Show PrizePicks props for this game', key=f'{load_key}_t'):
+        if st.toggle(f'Show PrizePicks props for this game ({len(markets)} credit'
+                     f'{"s" if len(markets) != 1 else ""} unless already cached)',
+                     key=f'{load_key}_t'):
             st.session_state[load_key] = True
             st.rerun()
         return
@@ -221,7 +221,8 @@ def render_prizepicks(db: Any, ep: str, home_team: str, away_team: str,
         props, err, remaining = fetch_props(sport, event['id'], markets, key)
     if err:
         st.warning(f'PrizePicks: {err}')
-        return
+        if not props:
+            return
     if not props:
         st.info('PrizePicks hasn\'t posted props for this game yet.')
         return

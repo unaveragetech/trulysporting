@@ -213,6 +213,9 @@ def render_odds_page(db) -> None:
     key = _api_key()
     fd = pd.DataFrame()
     if key and ep_key in ODDS_SPORT_MAP:
+        st.toggle('Include FanDuel moneylines (1 credit per league, cached 30 min for everyone; '
+                  'also used by Matchups & Best Bets)', key='fd_on')
+    if key and ep_key in ODDS_SPORT_MAP and st.session_state.get('fd_on'):
         events, ferr, remaining = fetch_fanduel_odds(ODDS_SPORT_MAP[ep_key], key)
         if ferr:
             st.warning(f'FanDuel: {ferr}')

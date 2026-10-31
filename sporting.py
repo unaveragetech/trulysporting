@@ -9590,6 +9590,24 @@ def main():
 
     if _page == 15:
         st.divider()
+        st.markdown("#### 💳 Odds API credits")
+        from odds_budget import set_daily_cap, usage as _odds_usage
+        _u = _odds_usage()
+        _c1, _c2, _c3 = st.columns(3)
+        _c1.metric("Left this month", _u['remaining'])
+        _c2.metric("Used today", f"{_u['used_today']} / {_u['daily_cap']}")
+        _c3.metric("Last paid call", _u['last_call'] or "—")
+        _cap = st.number_input("Daily credit cap", 0, 500, _u['daily_cap'], step=5,
+                               help="Calls that would go over this are refused and the last "
+                                    "saved lines are shown instead. 15/day ≈ 450/month.")
+        if _cap != _u['daily_cap']:
+            set_daily_cap(_cap)
+            st.rerun()
+        st.caption("Costs: FanDuel moneylines 1 credit per league (opt-in on the Odds page), "
+                   "PrizePicks 1 credit per prop type per game. Everything is cached 30 min "
+                   "in the database and shared by all visitors.")
+
+        st.divider()
         st.markdown("#### 🔐 Admin")
         if _render_admin_gate('settings_admin'):
             st.success("Admin tools unlocked — Network, Schema Explorer, Raw Inspector "
