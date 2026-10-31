@@ -18,7 +18,8 @@ import requests
 import streamlit as st
 
 from fanduel_odds import american_to_prob
-from matchups import _HFA, _SIGMA, build_slate, predict, prob_to_american, team_form
+from matchups import (_HFA, _SIGMA, blended_prob, build_slate, predict,
+                      prob_to_american, team_form)
 from odds_page import KALSHI_SERIES, attach_kalshi, fetch_kalshi_markets
 
 SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/{ep}/scoreboard"
@@ -326,8 +327,9 @@ def _profit_per_100(american: float) -> float:
 
 
 def find_bets(games: pd.DataFrame, ep: str) -> pd.DataFrame:
-    """Every priced market on the slate with model probability, market
-    probability (no-vig where both sides are known), edge and EV per $100."""
+    """Every priced moneyline on the slate with the market-anchored probability
+    (model blended into the market, weight fitted by the backtest), the book's
+    no-vig probability, edge and EV per $100. Spreads/totals are model leans."""
     sigma = _SIGMA.get(ep.split('/')[0], 12.0)
     rows = []
     for g in games.itertuples():
@@ -337,12 +339,12 @@ def find_bets(games: pd.DataFrame, ep: str) -> pd.DataFrame:
         game = f'{g.away_abbr} @ {g.home_abbr}'
         ph = pred['p_home']
 
-        def add(bet, book, price, p_model, p_market):
+        def add(bet, market, book, price, p_model, p_market, side_price=None):
             if price is None or pd.isna(price) or p_model is None:
                 return
             ev = p_model * _profit_per_100(price) - (1 - p_model) * 100
-            rows.append({'Game': game, 'Bet': bet, 'Book': book, 'Price': price,
-                         'Model %': p_model, 'Market %': p_market,
+            rows.append({'Game': game, 'Bet': bet, 'Market': market, 'Book': book,
+                         'Price': price, 'Model %': p_model, 'Market %': p_market,
                          'Edge': (p_model - p_market) if p_market is not None else None,
                          'EV / $100': ev})
 
@@ -350,35 +352,52 @@ def find_bets(games: pd.DataFrame, ep: str) -> pd.DataFrame:
             ph_, pa_ = american_to_prob(h), american_to_prob(a)
             return (ph_ / (ph_ + pa_), pa_ / (ph_ + pa_)) if ph_ and pa_ else (ph_, pa_)
 
-        for book, h, a in (('FanDuel', g.fd_home_ml, g.fd_away_ml),
-                           (g.espn_book or 'ESPN book', g.espn_home_ml, g.espn_away_ml)):
-            if h is None or pd.isna(h):
-                continue
+        # Consensus = average no-vig probability across every source we see;
+        # the model is blended into the consensus, and each book is compared
+        # against that (so price differences between books show up as edges).
+        books = [(b, h, a) for b, h, a in (('FanDuel', g.fd_home_ml, g.fd_away_ml),
+                                           (g.espn_book or 'ESPN book', g.espn_home_ml, g.espn_away_ml))
+                 if h is not None and not pd.isna(h) and a is not None and not pd.isna(a)]
+        probs = [nv(h, a)[0] for _, h, a in books]
+        if g.kalshi_home is not None and not pd.isna(g.kalshi_home):
+            probs.append(float(g.kalshi_home))
+        probs = [p for p in probs if p is not None]
+        consensus = sum(probs) / len(probs) if probs else None
+        pb = blended_prob(ep, ph, consensus)
+        for book, h, a in books:
             mh, ma = nv(h, a)
-            add(f'{g.home_abbr} moneyline', book, h, ph, mh)
-            add(f'{g.away_abbr} moneyline', book, a, 1 - ph, ma)
+            add(f'{g.home_abbr} moneyline', 'moneyline', book, h, pb, mh)
+            add(f'{g.away_abbr} moneyline', 'moneyline', book, a, 1 - pb, ma)
         if g.kalshi_home is not None and not pd.isna(g.kalshi_home):
             k = float(g.kalshi_home)
-            add(f'{g.home_abbr} to win', 'Kalshi', prob_to_american(k), ph, k)
-            add(f'{g.away_abbr} to win', 'Kalshi', prob_to_american(1 - k), 1 - ph, 1 - k)
-        # Spread & total at standard -110 (ESPN line).
+            add(f'{g.home_abbr} to win', 'moneyline', 'Kalshi', prob_to_american(k), pb, k)
+            add(f'{g.away_abbr} to win', 'moneyline', 'Kalshi', prob_to_american(1 - k), 1 - pb, 1 - k)
+        # Spread & total: raw model vs ESPN line at standard -110 (not validated).
         if g.espn_spread is not None and not pd.isna(g.espn_spread):
-            hs = float(g.espn_spread)  # home line, e.g. -3.5
+            hs = float(g.espn_spread)
             p_cover = _norm_cdf((pred['margin'] + hs) / sigma)
-            add(f'{g.home_abbr} {hs:+g}', g.espn_book or 'ESPN book', -110, p_cover, 0.5)
-            add(f'{g.away_abbr} {-hs:+g}', g.espn_book or 'ESPN book', -110, 1 - p_cover, 0.5)
+            add(f'{g.home_abbr} {hs:+g}', 'spread', g.espn_book or 'ESPN book', -110, p_cover, 0.5)
+            add(f'{g.away_abbr} {-hs:+g}', 'spread', g.espn_book or 'ESPN book', -110, 1 - p_cover, 0.5)
         if g.espn_total is not None and not pd.isna(g.espn_total):
             line = float(g.espn_total)
             tot = pred['home_pts'] + pred['away_pts']
             p_over = 1 - _norm_cdf((line - tot) / (sigma * 1.2))
-            add(f'Over {line:g}', g.espn_book or 'ESPN book', -110, p_over, 0.5)
-            add(f'Under {line:g}', g.espn_book or 'ESPN book', -110, 1 - p_over, 0.5)
+            add(f'Over {line:g}', 'total', g.espn_book or 'ESPN book', -110, p_over, 0.5)
+            add(f'Under {line:g}', 'total', g.espn_book or 'ESPN book', -110, 1 - p_over, 0.5)
     return pd.DataFrame(rows)
 
 
+def _bet_table(df: pd.DataFrame) -> pd.DataFrame:
+    return df.drop(columns=['Market']).assign(
+        Price=df['Price'].map(lambda p: f'{p:+.0f}'),
+        **{'Model %': df['Model %'].map('{:.0%}'.format),
+           'Market %': df['Market %'].map(lambda p: '—' if p is None else f'{p:.0%}'),
+           'Edge': df['Edge'].map(lambda e: '—' if e is None else f'{e:+.1%}'),
+           'EV / $100': df['EV / $100'].map(lambda v: f'${v:+.0f}')})
+
+
 def render_best_bets(db: Any, worker: Any, ep: str, season: int, label: Callable[[str], str]) -> None:
-    st.caption(f'{label(ep)} · upcoming games · the model vs every line we can see. '
-               'Ranked by expected value per $100. Spreads/totals assume standard −110.')
+    st.caption(f'{label(ep)} · upcoming games · market-anchored model vs every line we can see.')
     with st.spinner('Pricing the slate…'):
         games, err = build_slate(db, worker, ep, season)
     if err:
@@ -386,49 +405,52 @@ def render_best_bets(db: Any, worker: Any, ep: str, season: int, label: Callable
     if games.empty:
         st.info('No upcoming games with lines for this league right now.')
         return
-    # Track record from the walk-forward backtest (📊 Backtest page).
-    try:
-        rec = json.loads(db.get_config(f'backtest_summary_{ep}', '') or '{}')
-    except ValueError:
-        rec = {}
-    if rec.get('bet_n'):
-        msg = (f"**Track record:** this strategy (edge ≥ {rec['edge']:.0%}) was tested on "
-               f"{int(rec['games']):,} past games: {int(rec['bet_n']):,} bets, "
-               f"ROI **{rec['bet_roi']:+.1%}**. The model picks winners "
-               f"{rec['accuracy']:.1%} of the time vs the closing line's "
-               f"{(rec.get('mkt_accuracy') or 0):.1%}.")
-        (st.warning if (rec.get('bet_roi') or 0) < 0 else st.success)(
-            msg + (' It has **lost money** historically — treat these as ideas, not picks.'
-                   if (rec.get('bet_roi') or 0) < 0 else ''))
     bets = find_bets(games, ep)
     if bets.empty:
         st.info('Not enough completed games yet to model this slate.')
         return
-    min_edge = st.slider('Minimum edge over the market', 0, 15, 3, format='%d%%',
-                         key='bb_min_edge') / 100
-    best = bets[bets['Edge'].fillna(0) >= min_edge].sort_values('EV / $100', ascending=False)
-    # One bet per game/market side: keep the best price.
-    best = best.drop_duplicates(['Game', 'Bet'])
-    if best.empty:
-        st.info('No lines clear that edge right now — the market and the model agree.')
+
+    # Only a rule that held up in BOTH halves of the backtest becomes "Best bets".
+    try:
+        rule = json.loads(db.get_config(f'bet_rule_{ep}', '') or '{}')
+    except ValueError:
+        rule = {}
+    ml = bets[bets['Market'] == 'moneyline']
+    if rule:
+        side_ok = {'all': lambda p: True, 'underdogs': lambda p: p > 0,
+                   'favorites': lambda p: p < 0}[rule['side']]
+        picks = ml[(ml['Edge'].fillna(0) >= rule['edge']) & ml['Price'].map(side_ok)]
+        picks = picks.sort_values('EV / $100', ascending=False).drop_duplicates(['Game', 'Bet'])
+        st.success(f"**Validated rule:** {rule['side']} moneylines with edge ≥ {rule['edge']:.0%} — "
+                   f"profitable in both backtest halves ({rule['roi_early']:+.1%} and "
+                   f"{rule['roi_late']:+.1%}). See 📊 Backtest.")
+        if picks.empty:
+            st.info('No game on this slate meets the validated rule right now.')
+        else:
+            top = picks.head(3)
+            cols = st.columns(len(top))
+            for col, (_, b) in zip(cols, top.iterrows()):
+                with col.container(border=True):
+                    st.markdown(f"**{b['Bet']}**  \n{b['Game']}")
+                    st.metric(f"{b['Book']} {b['Price']:+.0f}", f"${b['EV / $100']:+.0f} EV",
+                              f"edge {b['Edge']:+.1%}")
+            st.dataframe(_bet_table(picks), hide_index=True, use_container_width=True)
     else:
-        top = best.head(3)
-        cols = st.columns(len(top))
-        for col, (_, b) in zip(cols, top.iterrows()):
-            with col.container(border=True):
-                st.markdown(f"**{b['Bet']}**  \n{b['Game']}")
-                st.metric(f"{b['Book']} {b['Price']:+.0f}", f"${b['EV / $100']:+.0f} EV",
-                          f"edge {b['Edge']:+.1%}")
-        show = best.assign(
-            Price=best['Price'].map(lambda p: f'{p:+.0f}'),
-            **{'Model %': best['Model %'].map('{:.0%}'.format),
-               'Market %': best['Market %'].map(lambda p: '—' if p is None else f'{p:.0%}'),
-               'Edge': best['Edge'].map(lambda e: '—' if e is None else f'{e:+.1%}'),
-               'EV / $100': best['EV / $100'].map(lambda v: f'${v:+.0f}')})
-        st.dataframe(show, hide_index=True, use_container_width=True)
-    st.caption('⚠️ Informational only, not betting advice. The model is a simple '
-               'form-and-injuries rating; edges are estimates and can be wrong. '
-               'Kalshi prices exclude fees.')
+        st.warning('**No validated betting edge for this league.** In the 📊 Backtest, no rule '
+                   'made money in both the earlier and the later seasons, so nothing here is '
+                   'a recommendation. Below are the biggest places the model disagrees with '
+                   'the market — useful for research, not for betting.')
+
+    with st.expander('🔍 Model leans — every market, biggest disagreements first',
+                     expanded=not rule):
+        leans = bets.dropna(subset=['Edge']).sort_values('Edge', ascending=False)
+        leans = leans.drop_duplicates(['Game', 'Bet']).head(25)
+        st.dataframe(_bet_table(leans), hide_index=True, use_container_width=True)
+        st.caption('Moneyline probabilities are market-anchored: the model blended into the '
+                   'consensus of all books with the backtest-fitted weight. A moneyline edge here '
+                   'mostly means one book is pricing the game differently from the others. '
+                   'Spreads/totals use the raw model at −110 and have not been validated.')
+    st.caption('⚠️ Informational only, not betting advice. Kalshi prices exclude fees.')
 
 
 def render_live_page(db: Any, worker: Any, leagues: List[str], g_league: str,
