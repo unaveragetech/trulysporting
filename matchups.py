@@ -139,11 +139,18 @@ def injury_penalty(db: Any, ep: str, team_id: str, team_abbr: str, pf: float) ->
     return {'penalty': pen, 'players': players}
 
 
-def predict(ep: str, home: Dict, away: Dict, pen_h: float = 0.0, pen_a: float = 0.0) -> Optional[Dict]:
+# Per-league shrink factor for the rating difference, fitted by the backtest
+# (raw ratings are overconfident). Loaded from config by the app each run.
+CALIBRATION: Dict[str, float] = {}
+
+
+def predict(ep: str, home: Dict, away: Dict, pen_h: float = 0.0, pen_a: float = 0.0,
+            calibrate: bool = True) -> Optional[Dict]:
     if not home.get('n') or not away.get('n'):
         return None
     sigma = _SIGMA.get(ep.split('/')[0], 12.0)
-    margin = home['rating'] - away['rating'] + _HFA.get(ep, 1.0) - pen_h + pen_a
+    k = CALIBRATION.get(ep, 1.0) if calibrate else 1.0
+    margin = k * (home['rating'] - away['rating']) + _HFA.get(ep, 1.0) - pen_h + pen_a
     total = (home['pf'] + away['pa']) / 2 + (away['pf'] + home['pa']) / 2 - pen_h - pen_a
     p_home = _norm_cdf(margin / sigma)
     return {'margin': margin, 'p_home': p_home,

@@ -20,6 +20,9 @@ from odds_page import render_odds_page
 from matchups import render_matchups_page
 import ui
 from live import render_live_page
+import matchups as _mu
+from backtest import (apply_shrink, fit_shrink, load_games, render_backtest_page,
+                      run_backtest, save_summary as save_backtest_summary)
 from engine import LeagueSync, describe as describe_sync
 from fanduel_odds import ODDS_SPORT_MAP
 from odds_page import KALSHI_SERIES
@@ -5045,14 +5048,14 @@ _ADMIN_PW_HASH  = "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d154
 _ADMIN_PIN_HASH = "ff7faf9dc56f2a51cc8c1e19c05e5f6609f01b89cb4e4e70e5a688d3a13d7cf9"
 
 
-_PUBLIC_PAGES = ["🏅 Scores", "🔴 Live", "⚔️ Matchups", "🎯 Odds", "👤 Players", "🏟 Teams",
+_PUBLIC_PAGES = ["🏅 Scores", "🔴 Live", "⚔️ Matchups", "🎯 Odds", "📊 Backtest", "👤 Players", "🏟 Teams",
                  "📈 Team Trends", "🏆 Rankings", "📰 News", "📋 Custom Views"]
 _ADMIN_PAGES = ["🌐 Network", "🔬 Schema Explorer", "🔍 Raw Inspector", "🛠 Admin Panel"]
 _PAGE_IDS = {
     "🏅 Scores": 1, "📈 Team Trends": 2, "👤 Players": 3, "🏟 Teams": 4,
     "📰 News": 5, "🏆 Rankings": 6, "🌐 Network": 7, "🔬 Schema Explorer": 8,
     "🔍 Raw Inspector": 9, "📋 Custom Views": 10, "🛠 Admin Panel": 11,
-    "💚 Support": 12, "🎯 Odds": 13, "⚔️ Matchups": 14, "⚙️ Settings": 15, "🔴 Live": 16,
+    "💚 Support": 12, "🎯 Odds": 13, "⚔️ Matchups": 14, "⚙️ Settings": 15, "🔴 Live": 16, "📊 Backtest": 17,
 }
 # Each page's own league picker; the global header picker drives them all.
 _PAGE_LEAGUE_KEYS = ['sb_ep', 'trend_ep', 'pt_ep', 'teams_ep', 'news_ep', 'r5_league',
@@ -5260,6 +5263,24 @@ def main():
         st.html(f'<span class="ts-chip">{_txt}</span>')
 
     g_league = ui.render_header(_active_g, _league_label, _sync_chip)
+
+    # Model calibration fitted by the backtest (once per league per session).
+    _cal_key = f'model_shrink_{g_league}'
+    if (not db.get_config(_cal_key, '') and g_league in MATCHUP_LEAGUES
+            and not st.session_state.get(f'_cal_tried_{g_league}')):
+        st.session_state[f'_cal_tried_{g_league}'] = True
+        _n_bt = len(load_games(db.db_name, g_league))
+        if _n_bt >= 50:
+            _bt = run_backtest(db.db_name, g_league, _n_bt, SportsDB.season_bounds)
+            if len(_bt) >= 50:
+                _k_fit = fit_shrink(_bt, g_league)
+                db.update_config(_cal_key, str(_k_fit))
+                save_backtest_summary(db, g_league, apply_shrink(_bt, g_league, _k_fit))
+    for _ep_c in _active_g:
+        try:
+            _mu.CALIBRATION[_ep_c] = float(db.get_config(f'model_shrink_{_ep_c}', '1') or 1)
+        except ValueError:
+            _mu.CALIBRATION[_ep_c] = 1.0
 
     # Drive every page's league picker from the header and hide the duplicates.
     _odds_ok = g_league in (set(ODDS_SPORT_MAP) | set(KALSHI_SERIES))
@@ -9554,6 +9575,9 @@ def main():
         if _render_admin_gate('settings_admin'):
             st.success("Admin tools unlocked — Network, Schema Explorer, Raw Inspector "
                        "and Admin Panel are now in the page menu.")
+
+    if _page == 17:
+        render_backtest_page(db, g_league, _league_label, SportsDB.season_bounds)
 
     if _page == 16:
         render_live_page(db, worker, _active_g, g_league,
