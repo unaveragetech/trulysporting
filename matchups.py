@@ -225,6 +225,8 @@ def _build_slate(db: Any, worker: Any, ep: str, season: int, include_fd: bool):
         pred = predict(ep, fh, fa, ph, pa)
         if pred:
             pred.update(pen_home=ph, pen_away=pa)
+            from tracker import log_prediction  # lock in the pre-game number for grading
+            log_prediction(db.db_name, str(g.espn_id), ep, 'pre', pred)
         preds.append(pred)
         fh_l.append(fh)
         fa_l.append(fa)

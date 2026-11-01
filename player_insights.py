@@ -88,7 +88,9 @@ def fetch_splits(ep: str, pid: str, season: Optional[int] = None) -> pd.DataFram
         data = r.json()
     except Exception:
         return pd.DataFrame()
-    labels = data.get('labels') or []
+    # ESPN repeats short labels (YDS for receiving AND rushing), which dataframes
+    # can't display; the long `names` are unique.
+    labels = [_label(n) for n in (data.get('names') or data.get('labels') or [])]
     rows = []
     for sc in data.get('splitCategories') or []:
         for sp in sc.get('splits') or []:
@@ -197,8 +199,10 @@ def render_player_insights(ep: str, pid: str, season: int, season_label, player_
             st.markdown(f'- {t}')
 
     st.markdown('##### 📈 Game by game')
+    # Key includes the stat set: a season change can offer different stats.
     pick = st.segmented_control('Stat', stats, format_func=_label, default=stats[0],
-                                key=f'pi_stat_{pid}', label_visibility='collapsed') or stats[0]
+                                key=f"pi_stat_{pid}_{'_'.join(stats)}",
+                                label_visibility='collapsed') or stats[0]
     st.plotly_chart(_trend_chart(df, pick), use_container_width=True, key=f'pi_chart_{pid}')
     st.caption('Bars: green = win, red = loss · blue line = 5-game average')
 

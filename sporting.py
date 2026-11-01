@@ -5051,13 +5051,13 @@ _ADMIN_PIN_HASH = "ff7faf9dc56f2a51cc8c1e19c05e5f6609f01b89cb4e4e70e5a688d3a13d7
 
 
 _PUBLIC_PAGES = ["🏅 Scores", "🔴 Live", "⚔️ Matchups", "🎯 Odds", "📊 Backtest", "👤 Players", "🏟 Teams",
-                 "📈 Team Trends", "🏆 Rankings", "📰 News", "📋 Custom Views"]
+                 "🔔 Watch", "📈 Team Trends", "🏆 Rankings", "📰 News", "📋 Custom Views"]
 _ADMIN_PAGES = ["🌐 Network", "🔬 Schema Explorer", "🔍 Raw Inspector", "🛠 Admin Panel"]
 _PAGE_IDS = {
     "🏅 Scores": 1, "📈 Team Trends": 2, "👤 Players": 3, "🏟 Teams": 4,
     "📰 News": 5, "🏆 Rankings": 6, "🌐 Network": 7, "🔬 Schema Explorer": 8,
     "🔍 Raw Inspector": 9, "📋 Custom Views": 10, "🛠 Admin Panel": 11,
-    "💚 Support": 12, "🎯 Odds": 13, "⚔️ Matchups": 14, "⚙️ Settings": 15, "🔴 Live": 16, "📊 Backtest": 17,
+    "💚 Support": 12, "🎯 Odds": 13, "⚔️ Matchups": 14, "⚙️ Settings": 15, "🔴 Live": 16, "📊 Backtest": 17, "🔔 Watch": 18,
 }
 # Each page's own league picker; the global header picker drives them all.
 _PAGE_LEAGUE_KEYS = ['sb_ep', 'trend_ep', 'pt_ep', 'teams_ep', 'news_ep', 'r5_league',
@@ -6344,10 +6344,15 @@ def main():
 
                     # ══ SUB-TAB 0: INSIGHTS (ESPN game log, any player) ══
                     with _ptsub0:
-                        render_player_insights(
-                            _pt_sport_key, str(_pt_player_id), _pt_season,
-                            lambda y, _c=_pt_cat: ESPNWorker._season_label(_c, y),
-                            _pt_sel_player)
+                        # One bad ESPN payload must not take down the whole page.
+                        try:
+                            render_player_insights(
+                                _pt_sport_key, str(_pt_player_id), _pt_season,
+                                lambda y, _c=_pt_cat: ESPNWorker._season_label(_c, y),
+                                _pt_sel_player)
+                        except Exception as _pi_err:
+                            logging.exception("player insights failed for %s", _pt_player_id)
+                            st.warning(f"Couldn't build insights for {_pt_sel_player}: {_pi_err}")
 
                     # ══ SUB-TAB 1: STATS ═══════════════════════════
                     with _ptsub1:
@@ -9627,6 +9632,14 @@ def main():
         if _render_admin_gate('settings_admin'):
             st.success("Admin tools unlocked — Network, Schema Explorer, Raw Inspector "
                        "and Admin Panel are now in the page menu.")
+
+    if _page == 18:
+        from tracker import render_tracker
+        st.markdown('## 🔔 Watch')
+        st.caption('Star games or add teams, choose what to be alerted about, and tap any game '
+                   'for its live game centre. Your list is saved in this browser.')
+        render_tracker(db, worker, _active_g, ESPNWorker._espn_season_year, _league_label,
+                       tab='watch')
 
     if _page == 17:
         render_backtest_page(db, g_league, _league_label, SportsDB.season_bounds)
