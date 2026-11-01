@@ -19,6 +19,7 @@ import plotly.express as px
 from odds_page import render_odds_page
 from matchups import render_matchups_page
 import ui
+from sporting_shared import viewer_today, viewer_tz
 from live import render_live_page
 from player_insights import render_player_insights
 import matchups as _mu
@@ -2650,7 +2651,7 @@ _READ_CACHE: Dict[Any, Tuple[int, float, Any]] = {}
 _READ_CACHE_LOCK = threading.Lock()
 _READ_GEN = {'n': 0}
 _READ_TTL = 300  # seconds; safety net for writes made outside SportsDB methods
-_READ_CACHE_MAX = 2000
+_READ_CACHE_MAX = 300
 
 
 def _clone(v: Any) -> Any:
@@ -3538,7 +3539,7 @@ def render_game_detail(event_id: str, db: Any, home_abbr: str, away_abbr: str):
     """
     gs = db.get_game_summary(event_id)
     if not gs:
-        st.info("No summary data yet — click **Fetch Summary** above.")
+        st.info("Game detail appears once the game starts.")
         return
 
     # Resolve team abbrs from stored summary if caller didn't supply them
@@ -4129,7 +4130,10 @@ def render_game_card(game: Any, db: Any = None, worker: Any = None, category: st
         pill = '<span class="tsg-pill" style="background:#e2e8f0;color:#334155">Final</span>'
     elif is_live:
         pill = (f'<span class="tsg-pill" style="background:#fee2e2;color:#b91c1c">● Live '
-                f'{game.get("clock", "")} · P{game.get("period", "")}</span>')
+                f'{game.get("clock", "")}'
+                + ('' if category == 'soccer' else
+                   f' · {"P" if category == "hockey" else "Q"}{game.get("period", "")}')
+                + '</span>')
     else:
         pill = (f'<span class="tsg-pill" style="background:#e8efff;color:#1e40af">'
                 f'{game.get("status_detail", "Scheduled")}</span>')
@@ -5171,6 +5175,8 @@ def main():
     )
 
     st.html(ui.CSS)
+    if 'streamlit.app' in (st.context.headers.get('host') or ''):
+        st.html(ui.CLOUD_CSS)
 
     # ── ADSENSE METHOD 2 — body-level sticky banner ──────────
     # Rendered on EVERY page state (landing, ToS, main app).
@@ -5236,6 +5242,8 @@ def main():
         db.update_config('admin_pin', _ADMIN_PIN_HASH)
 
     # ── WELCOME + TERMS (one screen) ──────────────────────
+    if st.query_params.get('ok') == '1':
+        st.session_state['tos_accepted'] = True
     if not st.session_state.get('tos_accepted', False):
         ui.render_landing()
         return
@@ -5340,7 +5348,8 @@ def main():
             db.update_config('active_endpoints', json.dumps(current_active))
             st.rerun()
 
-        new_active = st.multiselect("Active Leagues", all_eps, default=current_active)
+        new_active = st.multiselect("Active Leagues", all_eps, default=current_active,
+                                    format_func=_league_label)
 
         if st.button("💾 Save Config"):
             db.update_config('active_endpoints', json.dumps(new_active))
@@ -5389,6 +5398,7 @@ def main():
         )
         if st.button('🏠 Back to welcome screen'):
             st.session_state['tos_accepted'] = False
+            st.query_params.pop('ok', None)
             st.rerun()
 
     # ── How-It-Works expander placed at the top of every tab ──────────────────
@@ -5397,29 +5407,24 @@ def main():
             'icon': '🏅',
             'summary': 'Browse and stream game results for any league you have added.',
             'steps': [
-                ('1 — Add a league', 'Open the **sidebar** (▶ left edge) → "Manage Leagues" → '
-                 'click **+ Add** next to any league. Active leagues appear across all tabs.'),
-                ('2 — Sync scores',  'Select the league & date, then click **🔄 Sync Scoreboard**. '
-                 'Results are stored locally so they load instantly on repeat visits.'),
-                ('3 — Fetch full detail', 'Click any game row to expand it, then click '
-                 '**📊 Fetch Summary**. This stores box scores, PBP, injuries, betting odds, '
-                 'and win probability — all used by the Players & Schema tabs.'),
-                ('Why is my date blank?', 'The date picker defaults to today. If your league '
-                 'is in off-season, pick a date when games were played and sync again.'),
+                ('1 — Pick a league', 'Use the menu at the top of the page. Add or remove '
+                 'leagues in **⚙️ Settings**.'),
+                ('2 — Everything loads itself', 'Upcoming games come first, then results. '
+                 'Whole seasons sync in the background; the chip in the header shows progress.'),
+                ('3 — Game detail', 'Open **Game Detail** or **Play-by-Play** on any started '
+                 'game. For a live view with a ticking clock, use **🔴 Live**.'),
             ],
         },
         'team_trends': {
             'icon': '📈',
             'summary': 'Analyse a team\'s season-over-season form, scoring patterns, and head-to-head records.',
             'steps': [
-                ('1 — Prerequisite', 'Sync the **Scoreboard** tab for this league first. '
-                 'Team Trends reads from the stored game history table — no live API call needed.'),
+                ('1 — Automatic', 'The team\'s schedule and results load by themselves.'),
                 ('2 — Select league & team', 'Use the dropdowns at the top. Teams load '
                  'automatically the first time you pick a league.'),
                 ('3 — Pick season', 'Season year follows ESPN convention: football = year the '
                  'season *starts*; basketball/hockey = year it *ends*.'),
-                ('Why is the chart empty?', 'Sync more scoreboard dates. The chart plots every '
-                 'game in the stored history — the more dates you sync, the richer the view.'),
+                ('Why is the chart empty?', 'The team has no completed games in that season yet.'),
             ],
         },
         'player_trends': {
@@ -5464,9 +5469,8 @@ def main():
             'icon': '🏆',
             'summary': 'Poll rankings (AP, Coaches Poll) and division/conference standings.',
             'steps': [
-                ('1 — Sync Scoreboard', 'Standings and rankings are fetched as part of the '
-                 'normal scoreboard sync — just sync any date for your league.'),
-                ('2 — Select league', 'Use the league selector at the top of this tab.'),
+                ('1 — Automatic', 'Standings and rankings load by themselves and refresh hourly.'),
+                ('2 — Select league', 'Use the menu at the top of the page.'),
                 ('Standings vs Rankings', 'Standings (wins/losses) are available for all '
                  'leagues. Poll Rankings (AP 25 etc.) are only available for college sports.'),
                 ('Why empty?', 'If standings are missing, the league may not be in-season '
@@ -5740,7 +5744,7 @@ def main():
                     if not _df_rest.empty:
                         # Ensure event_date is string for grouping
                         _df_rest['event_date'] = _df_rest['event_date'].astype(str)
-                        _today_str    = _dt1.datetime.now().strftime('%Y-%m-%d')
+                        _today_str    = viewer_today().strftime('%Y-%m-%d')
                         # Upcoming (soonest first), then results (most recent first).
                         _all_d = _df_rest['event_date'].unique()
                         _up_d = sorted(d for d in _all_d if d >= _today_str)
@@ -6637,7 +6641,7 @@ def main():
                     label_map3[tid] = f"{tr['team_abbr']}  —  {tr['team_name']}{rec}"
 
                 with left3:
-                    st.caption(f"{len(df_teams)} teams in {sel_ep3}")
+                    st.caption(f"{len(df_teams)} teams in {_league_label(sel_ep3)}")
                     t3_search = st.text_input("🔍 Filter", placeholder="Search teams…",
                                               key="t3_search", label_visibility="collapsed")
                     filtered_ids = [tid for tid in team_ids3
@@ -6767,7 +6771,7 @@ def main():
 
                             with ov_tab:
                                 if det3 is None:
-                                    st.info("Click **📥 Load Detail** to see records, venue & upcoming games.")
+                                    st.info("ESPN has no extra detail for this team yet.")
                                 else:
                                     # Records
                                     try:
@@ -6972,7 +6976,7 @@ def main():
                             if pub:
                                 try:
                                     dt = datetime.fromisoformat(pub.replace('Z', '+00:00'))
-                                    meta.append(dt.strftime('%b %d, %Y %H:%M'))
+                                    meta.append(dt.astimezone(viewer_tz()).strftime('%b %d, %Y %I:%M %p'))
                                 except Exception:
                                     meta.append(pub[:10])
                             if row.get('byline'):
@@ -9611,7 +9615,9 @@ def main():
                        "goes in .streamlit/secrets.toml.")
 
         st.markdown("#### 💳 Odds API credits")
-        from odds_budget import set_daily_cap, usage as _odds_usage
+        from odds_budget import refresh_remaining, set_daily_cap, usage as _odds_usage
+        if _kf['key'] and _odds_usage()['remaining'] == '?':
+            refresh_remaining(_kf['key'])
         _u = _odds_usage()
         _c1, _c2, _c3 = st.columns(3)
         _c1.metric("Left this month", _u['remaining'])

@@ -1,5 +1,23 @@
 """Helpers needed by modules that cannot import the sporting.py app script."""
+from datetime import date, datetime, tzinfo
 from typing import Tuple
+from zoneinfo import ZoneInfo
+
+import streamlit as st
+
+
+def viewer_tz() -> tzinfo:
+    """The browser's timezone; falls back to the server's."""
+    try:
+        if st.context.timezone:
+            return ZoneInfo(st.context.timezone)
+    except Exception:
+        pass
+    return datetime.now().astimezone().tzinfo
+
+
+def viewer_today() -> date:
+    return datetime.now(viewer_tz()).date()
 
 
 def season_bounds(category: str, season_year: int) -> Tuple[str, str]:
