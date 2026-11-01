@@ -180,6 +180,59 @@ def _book_home_nv(r) -> Optional[float]:
     return h / (h + a) if h and a else None
 
 
+def _risk_text(team: str, price: float) -> str:
+    if price < 0:
+        return f"**{team} {price:+.0f}**: risk ${-price:.0f} to win $100 (favorite)"
+    return f"**{team} {price:+.0f}**: risk $100 to win ${price:.0f} (underdog)"
+
+
+def render_line_explainer(games: pd.DataFrame) -> None:
+    """Plain-English reading of one game's lines."""
+    st.markdown('#### 📖 What these lines mean')
+    # Games with posted lines first (in-progress games often have none).
+    rows = sorted(games.itertuples(), key=lambda r: not (_ok(r.espn_home_ml) or _ok(r.espn_spread)))
+    opts = {f'{r.away_abbr} @ {r.home_abbr}': r for r in rows}
+    g = opts[st.selectbox('Explain game', list(opts), key='explain_game')]
+    pts = []
+    h, a, src = g.espn_home_ml, g.espn_away_ml, g.espn_book or 'the book'
+    if _ok(g.fd_home_ml) and _ok(g.fd_away_ml):
+        h, a, src = g.fd_home_ml, g.fd_away_ml, 'FanDuel'
+    if _ok(h) and _ok(a):
+        ph, pa = american_to_prob(h), american_to_prob(a)
+        pts.append(f"**Moneyline ({src}), who wins:** {_risk_text(g.home_abbr, h)}. "
+                   f"{_risk_text(g.away_abbr, a)}.")
+        pts.append(f"**Implied chance:** the prices add up to {ph + pa:.1%}. The extra "
+                   f"{ph + pa - 1:.1%} is the book's cut (the vig). Without it: {g.home_abbr} "
+                   f"{ph / (ph + pa):.0%}, {g.away_abbr} {pa / (ph + pa):.0%}.")
+    if _ok(g.espn_spread) and float(g.espn_spread):
+        sp = float(g.espn_spread)
+        fav, dog, n = (g.home_abbr, g.away_abbr, -sp) if sp < 0 else (g.away_abbr, g.home_abbr, sp)
+        pts.append(f"**Spread:** {fav} -{n:g} must win by more than {n:g}. {dog} +{n:g} wins the "
+                   f"bet by losing by less than {n:g} or winning outright."
+                   + (' Landing exactly on the number is a push (stake refunded).'
+                      if n.is_integer() else ''))
+    if _ok(g.espn_total):
+        pts.append(f"**Total:** {g.espn_total:g}. Over wins if the teams combine for more, "
+                   "Under if they combine for fewer.")
+    if _ok(g.kalshi_home):
+        k = float(g.kalshi_home)
+        pts.append(f"**Kalshi:** a prediction market, not a sportsbook. {k:.0%} means a "
+                   f"{g.home_abbr} yes contract costs about {k * 100:.0f}¢ and pays $1 if they win.")
+    if not pts:
+        st.caption('No lines posted for this game yet.')
+    for t in pts:
+        st.markdown(f'- {t}')
+    with st.expander('Glossary'):
+        st.markdown(
+            "- **No-vig %**: the market's estimated chance after removing the book's cut.\n"
+            "- **Edge**: a model's chance minus the market's chance. Only meaningful if the "
+            "model has proven itself; see 📊 Backtest.\n"
+            "- **EV / $100**: average profit per $100 if the stated probability is right.\n"
+            "- **Line movement**: a price changing as money and news come in.\n"
+            "- **PrizePicks More/Less**: pick whether a player beats a stat line; payouts "
+            "depend on the whole entry, not one pick.")
+
+
 def render_odds_page(db) -> None:
     st.markdown('## 🎯 Odds & Lines')
     st.caption('FanDuel (The Odds API) · ESPN scoreboard odds · Kalshi prediction market. '
@@ -254,6 +307,8 @@ def render_odds_page(db) -> None:
     st.caption('**Kalshi − Book**: how much more (+) or less (−) likely the prediction market '
                'rates the home team than the sportsbook no-vig price. Big gaps can flag value '
                '— or a stale line.')
+
+    render_line_explainer(games)
 
     # ── PrizePicks player props for one game ──
     st.markdown('#### 🟣 PrizePicks player props')
