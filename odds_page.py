@@ -182,8 +182,8 @@ def _book_home_nv(r) -> Optional[float]:
 
 def _risk_text(team: str, price: float) -> str:
     if price < 0:
-        return f"**{team} {price:+.0f}**: risk ${-price:.0f} to win $100 (favorite)"
-    return f"**{team} {price:+.0f}**: risk $100 to win ${price:.0f} (underdog)"
+        return f"**{team} {price:+.0f}**: risk \\${-price:.0f} to win \\$100 (favorite)"
+    return f"**{team} {price:+.0f}**: risk \\$100 to win \\${price:.0f} (underdog)"
 
 
 def render_line_explainer(games: pd.DataFrame) -> None:
@@ -217,7 +217,7 @@ def render_line_explainer(games: pd.DataFrame) -> None:
     if _ok(g.kalshi_home):
         k = float(g.kalshi_home)
         pts.append(f"**Kalshi:** a prediction market, not a sportsbook. {k:.0%} means a "
-                   f"{g.home_abbr} yes contract costs about {k * 100:.0f}¢ and pays $1 if they win.")
+                   f"{g.home_abbr} yes contract costs about {k * 100:.0f}¢ and pays \\$1 if they win.")
     if not pts:
         st.caption('No lines posted for this game yet.')
     for t in pts:
@@ -227,7 +227,7 @@ def render_line_explainer(games: pd.DataFrame) -> None:
             "- **No-vig %**: the market's estimated chance after removing the book's cut.\n"
             "- **Edge**: a model's chance minus the market's chance. Only meaningful if the "
             "model has proven itself; see 📊 Backtest.\n"
-            "- **EV / $100**: average profit per $100 if the stated probability is right.\n"
+            "- **EV / \\$100**: average profit per \\$100 if the stated probability is right.\n"
             "- **Line movement**: a price changing as money and news come in.\n"
             "- **PrizePicks More/Less**: pick whether a player beats a stat line; payouts "
             "depend on the whole entry, not one pick.")
