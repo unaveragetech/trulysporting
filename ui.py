@@ -117,8 +117,9 @@ CLOUD_CSS = """
 <style>
 @media (max-width: 768px) {
   .st-key-ts_header { padding-top: 44px !important; }
-  .st-key-ts_bottomnav { padding-right: 125px !important; }
-  .st-key-ts_bottomnav button { flex-basis: 20% !important; width: 20% !important; }
+  /* The badge and avatar can sit anywhere along the bottom, so clear them vertically. */
+  .st-key-ts_bottomnav { bottom: 62px !important; border-radius: 14px 14px 0 0; }
+  .block-container { padding-bottom: 180px !important; }
 }
 </style>
 """
