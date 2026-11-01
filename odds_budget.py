@@ -110,7 +110,7 @@ def cached_get(url: str, params: Dict[str, Any], cost: int, ttl: int,
                 today = date.today().isoformat()
                 _set(con, f'oddsapi_used_{today}',
                      int(_cfg(con, f'oddsapi_used_{today}', '0') or 0) + int(spent))
-            _set(con, 'oddsapi_last_call', time.strftime('%Y-%m-%d %H:%M'))
+            _set(con, 'oddsapi_last_call', time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime()))
             con.commit()
             if r.status_code == 401:
                 return None, 'Invalid ODDS_API_KEY.'

@@ -117,7 +117,7 @@ CLOUD_CSS = """
 <style>
 @media (max-width: 768px) {
   .st-key-ts_header { padding-top: 44px !important; }
-  .st-key-ts_bottomnav { padding-right: 84px !important; }
+  .st-key-ts_bottomnav { padding-right: 125px !important; }
   .st-key-ts_bottomnav button { flex-basis: 20% !important; width: 20% !important; }
 }
 </style>
