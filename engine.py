@@ -57,6 +57,7 @@ class LeagueSync:
         while not self._stop.is_set():
             try:
                 self._cycle()
+                self._prune_cache()
                 self._set(phase='idle', done=0, total=0)
             except Exception as e:  # keep the engine alive
                 self._set(phase='error', error=str(e)[:200])
@@ -83,6 +84,14 @@ class LeagueSync:
             # Only a past season with games and every box score is "complete".
             if yr != cur and ok and not self._stop.is_set():
                 self.db.update_config(done_key, str(time.time()))
+
+    def _prune_cache(self) -> None:
+        """Raw game-summary JSON is already parsed into tables; don't keep it forever."""
+        conn = self.db.get_connection()
+        conn.execute("DELETE FROM api_cache WHERE endpoint_key LIKE '%\\_summary\\_%' ESCAPE '\\' "
+                     "AND fetched_at < datetime('now', '-2 days')")
+        conn.commit()
+        conn.close()
 
     def _sync_schedule(self, yr: int) -> None:
         chunks = []

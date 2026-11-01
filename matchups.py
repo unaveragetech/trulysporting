@@ -13,7 +13,6 @@ import json
 import math
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 from typing import Any, Callable, Dict, Optional
 
 import pandas as pd
@@ -459,7 +458,8 @@ def render_matchups_page(db: Any, worker: Any, season_for: Callable[[str], int],
         st.info('No upcoming games on the schedule for this league right now.')
         return
 
-    tz = datetime.now().astimezone().tzinfo
+    from sporting_shared import viewer_tz
+    tz = viewer_tz()
     sel = st.session_state.get('mu_open')
     for g in games.itertuples():
         fh, fa, pred = g.form_home, g.form_away, g.pred

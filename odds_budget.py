@@ -53,6 +53,21 @@ def usage() -> Dict[str, Any]:
     return out
 
 
+def refresh_remaining(api_key: str) -> None:
+    """The /sports listing costs no credits and reports the balance in its headers."""
+    try:
+        r = requests.get('https://api.the-odds-api.com/v4/sports',
+                         params={'apiKey': api_key}, timeout=10)
+        left = r.headers.get('x-requests-remaining')
+        if left:
+            con = _con()
+            _set(con, 'oddsapi_remaining', left)
+            con.commit()
+            con.close()
+    except Exception:
+        pass
+
+
 def set_daily_cap(cap: int) -> None:
     con = _con()
     _set(con, 'oddsapi_daily_cap', int(cap))

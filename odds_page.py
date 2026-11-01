@@ -3,7 +3,7 @@
 ESPN and Kalshi need no key. FanDuel lines come from fanduel_odds.py.
 """
 import json
-from datetime import datetime
+from sporting_shared import viewer_tz
 from typing import Dict, Optional, Tuple
 
 import pandas as pd
@@ -283,7 +283,7 @@ def render_odds_page(db) -> None:
 
     book_nv = [_book_home_nv(r) for r in games.itertuples()]
     view = pd.DataFrame({
-        'Start': pd.to_datetime(games['date']).dt.tz_convert(datetime.now().astimezone().tzinfo).dt.strftime('%a %m/%d %H:%M'),
+        'Start': pd.to_datetime(games['date']).dt.tz_convert(viewer_tz()).dt.strftime('%a %m/%d %H:%M'),
         'Matchup': games['away_abbr'] + ' @ ' + games['home_abbr'],
         'FD Home ML': games['fd_home_ml'].map(_fmt_price),
         'FD Away ML': games['fd_away_ml'].map(_fmt_price),
@@ -314,7 +314,9 @@ def render_odds_page(db) -> None:
     st.markdown('#### 🟣 PrizePicks player props')
     from matchups import player_projections
     from prizepicks_props import render_prizepicks
-    _opts = {f"{r.away_abbr} @ {r.home_abbr}": r for r in games.itertuples()}
+    # Games that haven't started first: props come down at kickoff.
+    _rows = sorted(games.itertuples(), key=lambda r: r.status != 'pre')
+    _opts = {f"{r.away_abbr} @ {r.home_abbr}": r for r in _rows}
     _pick = st.selectbox('Game', list(_opts), key='pp_game')
     _g = _opts[_pick]
     render_prizepicks(db, ep_key, _g.home_team, _g.away_team,

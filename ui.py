@@ -111,6 +111,18 @@ h1, h2, h3 { letter-spacing: -.4px; color: var(--ts-ink); }
 </style>
 """
 
+# Streamlit Cloud draws its own Fork/avatar/badge over the app and they can't be
+# hidden from inside it, so on phones the layout leaves room for them.
+CLOUD_CSS = """
+<style>
+@media (max-width: 768px) {
+  .st-key-ts_header { padding-top: 44px !important; }
+  .st-key-ts_bottomnav { padding-right: 84px !important; }
+  .st-key-ts_bottomnav button { flex-basis: 20% !important; width: 20% !important; }
+}
+</style>
+"""
+
 LANDING_CSS = """
 <style>
 .ts-hero { text-align: center; padding: 6vh 8px 2vh; }
@@ -149,6 +161,7 @@ def render_landing() -> bool:
                             key='tos_check')
         if st.button('Get started  →', type='primary', use_container_width=True, disabled=not agree):
             st.session_state['tos_accepted'] = True
+            st.query_params['ok'] = '1'  # a refresh or bookmark shouldn't ask again
             st.session_state['app_started'] = True
             st.rerun()
     st.html('<div class="ts-terms" style="text-align:center;margin-top:10px">'

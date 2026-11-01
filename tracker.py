@@ -9,7 +9,7 @@ import os
 import re
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime
+from datetime import datetime
 from difflib import SequenceMatcher
 from typing import Any, Callable, Dict, List, Optional
 
@@ -22,6 +22,7 @@ from backtest import apply_shrink, load_games, run_backtest
 from live import ALL_ESPN_LEAGUES, SCOREBOARD, SUMMARY, _get, pregame_prediction
 from matchups import _HFA
 from odds_page import fetch_espn_lines
+from sporting_shared import viewer_today
 
 _component = components.declare_component(
     'ts_tracker', path=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend'))
@@ -231,7 +232,8 @@ def _call(p: Optional[float], hs: int, as_: int) -> Optional[bool]:
 def render_results(db: Any, worker: Any, ep: str, label, bounds) -> None:
     st.caption(f"{label(ep)} · how our projector and ESPN's pre-game win probability "
                'did on finished games.')
-    day = st.date_input('Date', value=date.today(), max_value=date.today(), key='res_day')
+    today = viewer_today()
+    day = st.date_input('Date', value=today, max_value=today, key='res_day')
     ds = day.strftime('%Y%m%d')
     events = [e for e in _day_events(ep, ds)
               if e['competitions'][0]['status']['type'].get('state') == 'post']
