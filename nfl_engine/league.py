@@ -69,6 +69,14 @@ def fg_feats(dist, wind_ex, cold, dome):
     return [dist, dist * dist / 100.0, wind_ex, cold, dome]
 
 
+RESP_LABELS = ("open", "loss", "incomplete", "short", "medium", "big", "penalty")  # what the offence is responding to
+RESP_IDX = {k: i for i, k in enumerate(RESP_LABELS)}
+YL_NODES = np.array([1, 2, 3, 5, 8, 12, 16, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 99])
+YL_IDX = np.array([int(np.abs(YL_NODES - y).argmin()) for y in range(0, 101)])
+PC_YTG = 16
+PC_GSR = np.array([3500, 3300, 3000, 2700, 2400, 2100, 1950, 1900, 1860, 1800, 1650, 1500, 1200, 900, 700, 540, 420, 300,
+                   240, 180, 135, 105, 75, 45, 20])  # denser near the ends of halves (two-minute drills)
+PC_GSR_IDX = np.array([int(np.abs(PC_GSR - g).argmin()) for g in range(0, 3611, 10)])
 SD_VALS = np.array([-24, -16, -11, -8, -5, -3, -1, 0, 1, 3, 5, 8, 11, 16, 24])
 GSR_VALS = np.array([3300, 2700, 2100, 1800, 1500, 1200, 900, 600, 420, 300, 180, 90, 30])
 YTG_MAX = 15
@@ -77,6 +85,31 @@ GSR_IDX = np.array([int(np.abs(GSR_VALS - g).argmin()) for g in range(0, 3611, 1
 
 
 # ---------------------------------------------------------------- pbp preparation
+
+
+def resp_codes(df: pd.DataFrame) -> np.ndarray:
+    """Per snap: what the previous play of the same drive was (index into RESP_LABELS); df sorted by game and play."""
+    g = df.groupby(["game_id", "drive"], sort=False)
+    prev_yds = g["yards_gained"].shift(1)
+    prev_type = g["play_type"].shift(1)
+    prev_pen = g["penalty"].shift(1).fillna(0) == 1
+    prev_inc = g["incomplete_pass"].shift(1).fillna(0) == 1
+    prev_sack = g["sack"].shift(1).fillna(0) == 1
+    lab = np.select(
+        [prev_type.isna(), prev_pen & prev_type.eq("no_play"), prev_sack | (prev_yds < 0), prev_inc, prev_yds <= 3,
+         prev_yds <= 9],
+        ["open", "penalty", "loss", "incomplete", "short", "medium"], default="big")
+    return np.array([RESP_IDX[x] for x in lab])
+
+
+def _qtr_hsr(gsr):
+    gsr = np.asarray(gsr, float)
+    qtr = np.where(gsr > 2700, 1, np.where(gsr > 1800, 2, np.where(gsr > 900, 3, 4)))
+    return qtr, np.where(gsr > 1800, gsr - 1800, gsr)
+
+
+def pc_state_feats(down, ytg, yl, sd, gsr, resp):
+    return np.c_[down, np.minimum(ytg, PC_YTG), yl, np.clip(sd, -30, 30), gsr, resp]
 
 
 def weather_cols(df: pd.DataFrame) -> pd.DataFrame:
@@ -131,6 +164,8 @@ def prepare_pbp(pbp: pd.DataFrame) -> pd.DataFrame:
 @dataclass
 class League:
     pc_model: LogisticRegression | None = None
+    pass_grid: np.ndarray | None = None  # [down4, ytg16, yl node, sd, PC_GSR, resp7] -> P(dropback), float16
+    pass_wx: tuple = (0.0, 0.0, 0.0)  # logit weights for (wind, cold, dome) relative to the league mean
     fourth_grid: np.ndarray | None = None  # [ytg, yl, sd, gsr, 3]  (go, punt, fg)
     fg_model: LogisticRegression | None = None
     rates: dict = field(default_factory=dict)  # (zone, ytgb) -> dict(sack, scr, comp, int)
@@ -178,6 +213,19 @@ def fit_league(pbp: pd.DataFrame, seed: int = 0, rules_pbp: pd.DataFrame | None 
             sc["half_seconds_remaining"], sc["game_seconds_remaining"], sc["wind_ex"], sc["cold"], sc["dome"])],
         dtype=float)
     L.pc_model = LogisticRegression(C=5.0, max_iter=400).fit(X, sc["dropback"].astype(int))
+    L.pass_wx = tuple(float(v) for v in L.pc_model.coef_[0][16:19])
+
+    # play-calling grid: gradient-boosted P(dropback | situation, previous-play response), tabulated for the simulator
+    resp = resp_codes(df)
+    sc = sc.assign(resp=resp[df.index.get_indexer(sc.index)])
+    Xp = pc_state_feats(sc["down"].to_numpy(), sc["ydstogo"].to_numpy(), sc["yardline_100"].to_numpy(),
+                        sc["score_differential"].to_numpy(), sc["game_seconds_remaining"].to_numpy(), sc["resp"].to_numpy())
+    hp = HistGradientBoostingClassifier(max_iter=300, max_depth=5, min_samples_leaf=60, learning_rate=0.06,
+                                        random_state=seed).fit(Xp, sc["dropback"].astype(int))
+    d_g, y_g, l_g, s_g, t_g, r_g = np.meshgrid(np.arange(1, 5), np.arange(1, PC_YTG + 1), YL_NODES, SD_VALS, PC_GSR,
+                                               np.arange(len(RESP_LABELS)), indexing="ij")
+    pg = hp.predict_proba(pc_state_feats(d_g.ravel(), y_g.ravel(), l_g.ravel(), s_g.ravel(), t_g.ravel(), r_g.ravel()))[:, 1]
+    L.pass_grid = pg.reshape(d_g.shape).astype(np.float16)
 
     # ---- fourth down decisions (lookup grid)
     f4 = df[(df["down"] == 4) & df["play_type"].isin(["pass", "run", "punt", "field_goal"])]

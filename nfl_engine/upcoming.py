@@ -40,7 +40,9 @@ def fresh_book(bundle: Bundle, refresh: bool = False):
         tgs.append(tg)
         qbgs.append(qbg)
     tg, qbg = pd.concat(tgs, ignore_index=True), pd.concat(qbgs, ignore_index=True)
-    return games, build_book(games, tg, qbg, bundle.rating_params)
+    book = build_book(games, tg, qbg, bundle.rating_params)
+    book.tend = getattr(bundle, "tend", None)
+    return games, book
 
 
 def catch_up(bundle: Bundle, games: pd.DataFrame, book, n: int = 60) -> None:

@@ -368,6 +368,93 @@ def _tuning_tab(rt) -> None:
         st.caption("No runs yet.")
 
 
+# ── Team dynamics ─────────────────────────────────────────────
+
+@st.cache_resource(show_spinner=False)
+def _dyn_ctx(season: int):
+    """Two seasons of rich play data with situation classes (kept in memory once for every session)."""
+    from nfl_engine import dynamics
+    from nfl_engine.runtime import RT
+    return dynamics.load_context(RT.bundle.league, [season - 1, season])
+
+
+def _dynamics_tab(rt) -> None:
+    from nfl_engine import dynamics as D
+    from nfl_engine.league import RESP_IDX
+    from nfl_engine.sim import Engine, GameSpec, SideParams
+
+    games = rt.games
+    season = int(games["season"].max())
+    teams = sorted(set(games["home_team"]) | set(games["away_team"]))
+    c1, c2 = st.columns(2)
+    a = c1.selectbox("Team", teams, index=teams.index("KC") if "KC" in teams else 0, key="nfl_dyn_a")
+    b = c2.selectbox("Opponent (for the matchup views)", [t for t in teams if t != a], key="nfl_dyn_b")
+    with st.spinner("Loading play-by-play tracking data…"):
+        ctx = _dyn_ctx(season)
+
+    st.markdown(f"##### What will {a} do? (engine call prediction vs {b}'s defense)")
+    k1, k2, k3, k4, k5 = st.columns(5)
+    down = k1.selectbox("Down", [1, 2, 3, 4], index=2)
+    ytg = k2.number_input("Yards to go", 1, 30, 7)
+    yl = k3.number_input("Yards to end zone", 1, 99, 55)
+    sd = k4.number_input("Score margin (A minus B)", -30, 30, 0)
+    gsr = k5.number_input("Game seconds left", 0, 3600, 1500)
+    resp = st.select_slider("What just happened", list(RESP_IDX), value="open",
+                            format_func=lambda x: {"open": "start of drive", "loss": "loss / sack", "incomplete": "incomplete pass",
+                                                   "short": "short gain (0-3)", "medium": "medium gain (4-9)", "big": "big gain (10+)",
+                                                   "penalty": "penalty"}[x])
+    L, tend = rt.bundle.league, rt.bundle.tend
+    qtr = 1 if gsr > 2700 else 2 if gsr > 1800 else 3 if gsr > 900 else 4
+    hsr = gsr - 1800 if gsr > 1800 else gsr
+    base_o = SideParams(proe=0.0)
+    eng0 = Engine(L, GameSpec(home=a, away=b, sides=(base_o, base_o)))
+    p_lg = eng0._pass_prob(base_o, down, ytg, yl, sd, qtr, hsr, gsr, 0, RESP_IDX[resp])
+    sh = tend.shifts(a, b, "upcoming", pd.Timestamp.today()) if tend is not None else None
+    o = SideParams(proe=0.0, tshift=sh)
+    p_a = eng0._pass_prob(o, down, ytg, yl, sd, qtr, hsr, gsr, 0, RESP_IDX[resp])
+    m1, m2, m3 = st.columns(3)
+    m1.metric(f"{a} pass", _pct(p_a), f"{100 * (p_a - p_lg):+.1f} pts vs league")
+    m2.metric(f"{a} run", _pct(1 - p_a))
+    m3.metric("League-average pass", _pct(p_lg))
+
+    with st.expander(f"Coach decisions ({a} vs league)", expanded=True):
+        ct = D.coach_decisions(ctx)
+        row, lg = ct.loc[a], ct.drop(columns=[c for c in ct if c.endswith("_vs_lg")] + ["games", "kneels", "4th_downs"]).mean()
+        keep = [c for c in ct.columns if not c.endswith("_vs_lg") and c not in ("games", "kneels", "4th_downs")]
+        st.dataframe(pd.DataFrame({"decision": keep, a: [row[c] for c in keep], "league": [lg[c] for c in keep],
+                                   "diff": [row[c] - lg[c] for c in keep]}).round(3), hide_index=True, use_container_width=True)
+        st.caption(f"{int(row['4th_downs'])} fourth downs and {int(row['games'])} games in the last two seasons. Go rate counts "
+                   "going for it vs punting or kicking. Timeouts are the team's own per game.")
+    with st.expander("Play calling by situation"):
+        fam = st.radio("Situation", ["dd", "sc", "zone", "resp"], horizontal=True, key="nfl_dyn_fam",
+                       format_func=lambda x: {"dd": "down & distance", "sc": "score & period", "zone": "field zone", "resp": "after what"}[x])
+        t1, t2 = st.columns(2)
+        t1.markdown(f"**{a} offense** (pass %)")
+        t1.dataframe(D.situational(ctx, a, fam), use_container_width=True)
+        t2.markdown(f"**{b} defense** (pass % faced)")
+        t2.dataframe(D.situational(ctx, b, fam, "def"), use_container_width=True)
+    with st.expander("What they run in response to what just happened"):
+        st.dataframe(D.response_matrix(ctx, a), use_container_width=True)
+        st.caption("Rows: the previous snap of the same drive. Columns: share of the next call, then the gap to the league.")
+    with st.expander("Formations, personnel and coverage"):
+        pp = D.personnel_profile(ctx, a)
+        if pp.empty:
+            st.caption("Participation data (formation / personnel) is not published for this season yet.")
+        else:
+            st.markdown(f"**{a} personnel groups** (RBs then TEs on the field: 11 = 1 RB, 1 TE)")
+            st.dataframe(pp, use_container_width=True)
+        dp = D.defense_profile(ctx, b)
+        if dp:
+            st.markdown(f"**{b} defense**")
+            st.json(dp)
+    with st.expander(f"Player usage ({a})"):
+        pu = D.player_usage(ctx, a)
+        st.dataframe(pu, hide_index=True, use_container_width=True) if not pu.empty else st.caption("No usage data.")
+    with st.expander(f"Recent meetings: {a} vs {b}"):
+        h = D.head_to_head(ctx, games, a, b)
+        st.dataframe(h, hide_index=True, use_container_width=True) if not h.empty else st.caption("No recent meetings in the data window.")
+
+
 # ── Entry point ───────────────────────────────────────────────
 
 def render_nfl_engine_page() -> None:
@@ -392,12 +479,15 @@ def render_nfl_engine_page() -> None:
     st.caption(f"Model trained through {b.train_end}"
                + (f" · held-out win accuracy {_pct(test.get('win_acc'), 1)} · margin MAE {_num(test.get('margin_mae'), 2)}" if test else "")
                + f" · loaded {rt.loaded_at}")
-    t_live, t_slate, t_players, t_tune = st.tabs(["Live: engine vs actual", "Slate", "Player matchups", "Nightly tuning"])
+    t_live, t_slate, t_players, t_dyn, t_tune = st.tabs(["Live: engine vs actual", "Slate", "Player matchups", "Team dynamics",
+                                                        "Nightly tuning"])
     with t_live:
         _live_fragment(rt)
     with t_slate:
         slate = _slate_tab(rt)
     with t_players:
         _players_tab(rt, rt.slate())
+    with t_dyn:
+        _dynamics_tab(rt)
     with t_tune:
         _tuning_tab(rt)

@@ -160,7 +160,7 @@ class PlayPredictor:
             self._np[k] = np.array(src[key] if kind != "sack" else self.L.sack_pool, float)
         return self._np[k]
 
-    def predict(self, side: int, down: int, ytg: int, yl: int, sd: int, gsr: int, period: int) -> dict:
+    def predict(self, side: int, down: int, ytg: int, yl: int, sd: int, gsr: int, period: int, resp: int = 0) -> dict:
         L, eng = self.L, self.eng
         o: SideParams = self.spec.sides[side]
         qtr = min(period, 4)
@@ -168,7 +168,7 @@ class PlayPredictor:
         from nfl_engine.league import clock_mode
 
         mode = clock_mode(sd, qtr, hsr)
-        p_pass = eng._pass_prob(o, down, ytg, yl, sd, qtr, hsr, gsr, mode)
+        p_pass = eng._pass_prob(o, down, ytg, yl, sd, qtr, hsr, gsr, mode, resp)
         z, b = zone(yl), ytg_bucket(ytg)
         rt = L.rates[(z, b)]
         ps, pc_ = max(0.0, rt["sack"] + o.d_sack), max(0.0, rt["scr"] + o.d_scr)
@@ -277,6 +277,20 @@ def save_log(log: dict) -> None:
     log_path(log["event"]).write_text(json.dumps(log), encoding="utf-8")
 
 
+def resp_code(prev: dict | None, cur: dict) -> int:
+    """What the offence is responding to (index into league.RESP_LABELS) from the previous play of the same drive."""
+    if prev is None or prev.get("off") != cur.get("off"):
+        return 0
+    if prev.get("is_penalty"):
+        return 6
+    y = prev.get("yards") or 0
+    if prev["cat"] == "sack" or y < 0:
+        return 1
+    if prev["cat"] == "inc":
+        return 2
+    return 3 if y <= 3 else 4 if y <= 9 else 5
+
+
 def process_event(event: str, predictor: PlayPredictor, spec: GameSpec, home: str) -> dict:
     """Fetch the game, predict + score any plays not yet logged, return the log."""
     summ = _get(f"{ESPN}/summary?event={event}", 12)
@@ -285,7 +299,7 @@ def process_event(event: str, predictor: PlayPredictor, spec: GameSpec, home: st
         log = load_log(event)
         log.update({"home": teams["home"], "away": teams["away"], "game_id": getattr(spec, "game_id", None)})
         changed = False
-        for pl in plays:
+        for i, pl in enumerate(plays):
             if pl["id"] in log["plays"] and log["plays"][pl["id"]].get("done"):
                 continue
             rec = {k: pl[k] for k in ("id", "seq", "text", "cat", "td", "period", "clock", "down", "ytg", "yl", "off",
@@ -297,7 +311,7 @@ def process_event(event: str, predictor: PlayPredictor, spec: GameSpec, home: st
                 before = (pl["home_before"], pl["away_before"])
                 sd = (before[0] - before[1]) * (1 if side == 0 else -1)
                 pr = predictor.predict(side, pl["down"], max(1, pl["ytg"]), max(1, int(pl["yl"])), sd, pl["gsr"],
-                                       pl["period"])
+                                       pl["period"], resp_code(plays[i - 1] if i else None, pl))
                 rec["pred"] = public(pr)
                 rec["score"] = score_play(pr, pl)
             rec["done"] = True

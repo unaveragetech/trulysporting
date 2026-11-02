@@ -97,3 +97,14 @@ UNABATED_PARTNER_CODE = "..."   # the code on tools.unabated.com/api-keys
 API rules followed: one odds request per 5 s (30 s cache, `Retry-After` honoured); deep links are Unabated's own
 `deepLink` values with only `utm_campaign` set to the partner code (existing value replaced, path untouched);
 no links are shown until a partner code is set; the key never appears in a page or link.
+
+## Team dynamics (play-calling model)
+
+`tracking.py` joins every snap with nflverse participation (formation, personnel, box count, coverage, pressure).
+`tendencies.py` tracks, per team *and per defense*, how often each did something unexpected in each situation
+(down & distance, score & period, field zone, and what the previous snap was), chronologically with decay and
+shrinkage so a game only sees earlier games. The simulator's play-call is now a gradient-boosted table
+(held-out log loss 0.538 vs 0.565 for the old logistic) plus those team shifts; `TendBook.update` folds in new
+games nightly. `dynamics.py` powers the **Team dynamics** tab: coach decisions (4th-down, 2-pt, timeouts, tempo),
+calls by situation, calls in response to the last play, personnel / coverage, player usage trends, recent meetings.
+Honest result: better play-level realism, but game-level accuracy is unchanged (win acc 65.1%, margin MAE 10.05).

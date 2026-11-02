@@ -50,6 +50,7 @@ class Runtime:
             livetune.load_adj()
             bundle = load_bundle()
             games, book = fresh_book(bundle, refresh=refresh)
+            self._update_tend(bundle, games, refresh)
             catch_up(bundle, games, book)
             season = int(games["season"].max())
             wk = games[games["home_score"].isna()]["week"].min()
@@ -65,6 +66,16 @@ class Runtime:
         except Exception as exc:  # noqa: BLE001
             with self._lock:
                 self.state, self.error = "error", str(exc)[:300]
+
+    @staticmethod
+    def _update_tend(bundle, games, refresh: bool) -> None:
+        """Fold games played since training into the situational tendency tracker (current season only)."""
+        if getattr(bundle, "tend", None) is None:
+            return
+        from nfl_engine.tendencies import context_frame
+
+        season = int(games["season"].max())
+        bundle.tend.update(context_frame(bundle.league, [season - 1, season], refresh=refresh), games)
 
     def refresh_after_games(self) -> dict:
         """Nightly: re-download results, fold them into ratings/residuals, persist the model."""
