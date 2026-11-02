@@ -207,7 +207,8 @@ def render_header(league_opts, league_label, status_fn=None) -> str:
 
 def render_nav(pages, bottom: dict, current: str, on_pick, on_bottom) -> None:
     """Desktop pill tabs + mobile bottom bar, both bound to the same page state."""
-    st.session_state['ts_topnav_sel'] = current
+    # A value outside the options makes the widget raise and takes the page down.
+    st.session_state['ts_topnav_sel'] = current if current in pages else None
     with st.container(key='ts_topnav'):
         st.segmented_control('Pages', pages, key='ts_topnav_sel', on_change=on_pick,
                              label_visibility='collapsed')

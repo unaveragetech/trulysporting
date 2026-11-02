@@ -5333,7 +5333,7 @@ def main():
         st.session_state['nav_page'] = _nav_opts[0]
     _nav_page = st.session_state['nav_page']
     st.query_params['page'] = _page_slug(_nav_page)
-    ui.render_nav([p for p in _nav_opts if p != '💚 Support'], _BOTTOM_NAV,
+    ui.render_nav(_nav_opts, _BOTTOM_NAV,
                   None if st.session_state.get('show_more') else _nav_page,
                   _on_top_nav, _on_bottom_nav)
     _page = 0 if st.session_state.get('show_more') else _PAGE_IDS.get(_nav_page, 1)
