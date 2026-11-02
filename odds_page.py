@@ -51,12 +51,12 @@ def fetch_espn_lines(ep_key: str) -> Tuple[pd.DataFrame, str]:
         comp = (ev.get('competitions') or [{}])[0]
         teams = {c.get('homeAway'): c.get('team', {}) for c in comp.get('competitors', [])}
         home, away = teams.get('home', {}), teams.get('away', {})
-        odds = (comp.get('odds') or [{}])[0]
-        ml = odds.get('moneyline', {})
-        ps = odds.get('pointSpread', {})
+        odds = (comp.get('odds') or [{}])[0] or {}  # ESPN can send [null]
+        ml = odds.get('moneyline') or {}
+        ps = odds.get('pointSpread') or {}
 
         def close(side, d, k='odds'):
-            blk = d.get(side, {})
+            blk = d.get(side) or {}
             return _num((blk.get('close') or blk.get('open') or {}).get(k))
 
         rows.append({
