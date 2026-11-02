@@ -42,8 +42,12 @@ def api_key() -> str:
     return _secret('UNABATED_API_KEY')
 
 
+# Public tracking identifier (not a secret); override with UNABATED_PARTNER_CODE.
+DEFAULT_PARTNER_CODE = 'jessewinghart'
+
+
 def partner_code() -> str:
-    return _secret('UNABATED_PARTNER_CODE')
+    return _secret('UNABATED_PARTNER_CODE') or DEFAULT_PARTNER_CODE
 
 
 def tag_link(url: Optional[str], code: str) -> Optional[str]:
