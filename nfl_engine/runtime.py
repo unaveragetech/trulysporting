@@ -120,7 +120,7 @@ class Runtime:
         with self._lock:
             if self._slate and time.time() - self._slate[0] < max_age and week is None:
                 return self._slate[1]
-        df = simulate_upcoming(self.bundle, self.games, self.book, n=1500, week=week, workers=2)
+        df = simulate_upcoming(self.bundle, self.games, self.book, n=1000, week=week, workers=1)
         if week is None:
             with self._lock:
                 self._slate = (time.time(), df)
