@@ -7,16 +7,12 @@ The Streamlit sidebar is not used at all; settings live on their own page.
 """
 import streamlit as st
 
+import theme
+
 # ── Design tokens ────────────────────────────────────────────
 CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-:root {
-  --ts-bg: #f5f7fb; --ts-card: #ffffff; --ts-ink: #0f172a; --ts-muted: #64748b;
-  --ts-line: #e5e9f2; --ts-brand: #2563eb; --ts-brand-soft: #e8efff;
-  --ts-good: #16a34a; --ts-bad: #dc2626; --ts-radius: 14px;
-  --ts-shadow: 0 1px 2px rgba(15,23,42,.04), 0 4px 16px rgba(15,23,42,.06);
-}
 html, body, [class*="css"], .stApp { font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; }
 .stApp { background: var(--ts-bg); }
 
@@ -65,10 +61,10 @@ div[data-testid="stVerticalBlockBorderWrapper"][style*="border"] , .stContainer 
   border-radius: var(--ts-radius) !important; box-shadow: var(--ts-shadow); }
 [data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; border: 1px solid var(--ts-line); }
 .stButton > button, .stDownloadButton > button { border-radius: 10px; font-weight: 600; }
-.stTabs [data-baseweb="tab-list"] { gap: 4px; background: #eef1f7; padding: 4px; border-radius: 12px;
+.stTabs [data-baseweb="tab-list"] { gap: 4px; background: var(--ts-card2); padding: 4px; border-radius: 12px;
   overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
 .stTabs [data-baseweb="tab"] { border-radius: 9px; padding: 6px 12px; font-size: 13px; white-space: nowrap; }
-.stTabs [aria-selected="true"] { background: #fff !important; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.stTabs [aria-selected="true"] { background: var(--ts-card) !important; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
 .stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] { display: none; }
 h1, h2, h3 { letter-spacing: -.4px; color: var(--ts-ink); }
 [data-baseweb="select"] > div { border-radius: 10px !important; }
@@ -167,11 +163,12 @@ FEATURES = [
 
 def render_landing() -> bool:
     """Single welcome screen with the terms inline. Returns True once accepted."""
-    st.html(CSS + LANDING_CSS)
+    st.html(CSS + LANDING_CSS + theme.css(theme.current_mode()))
     st.html(
         '<div class="ts-hero"><div class="t">Truly<span>Sporting</span></div>'
         '<div class="s">Scores, matchups, odds and player stats for every major league — '
-        'all loaded for you, on any screen.</div></div>'
+        'all loaded for you, on any screen.</div>'
+        '<div class="sports" aria-hidden="true">🏈 🏀 ⚾ 🏒 ⚽</div></div>'
         '<div class="ts-feats">' + ''.join(
             f'<div class="ts-feat"><span style="font-size:24px">{i}</span><b>{t}</b><small>{d}</small></div>'
             for i, t, d in FEATURES) + '</div>')
@@ -195,14 +192,17 @@ def render_header(league_opts, league_label, status_fn=None) -> str:
     with st.container(key='ts_header'):
         c1, c2 = st.columns([3, 2], vertical_alignment='center')
         with c1:
-            st.html('<div class="ts-brand"><span class="logo">🏆</span><div>'
+            st.html('<div class="ts-brand">' + theme.LOGO_SVG + '<div>'
                     '<div class="name">TrulySporting</div>'
-                    '<div class="sub">Scores · Matchups · Odds · Players</div></div></div>')
+                    '<div class="sub">Scores · Matchups · Odds · Players</div></div>'
+                    + theme.switch_html(theme.current_mode()) + '</div>')
         with c2:
             league = st.selectbox('League', league_opts, key='g_league',
                                   format_func=league_label, label_visibility='collapsed')
         if status_fn:
             status_fn()
+        st.html(theme.cycle_html(theme.current_mode()))
+    st.html(theme.league_css(league))
     return league
 
 
