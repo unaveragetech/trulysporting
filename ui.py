@@ -26,7 +26,8 @@ section[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
 #MainMenu, footer, [data-testid="stAppDeployButton"] { visibility: hidden; }
 header[data-testid="stHeader"] { background: transparent; height: 0; }
 
-.block-container { padding: 0.75rem 1.25rem 2rem !important; max-width: 1280px; }
+/* The fixed ad bar is about 100px tall on every page, so scrolling must clear it. */
+.block-container { padding: 0.75rem 1.25rem 160px !important; max-width: 1280px; }
 
 /* ── Header ── */
 .st-key-ts_header {
@@ -93,7 +94,7 @@ h1, h2, h3 { letter-spacing: -.4px; color: var(--ts-ink); }
       .tsg-head { font-size:13px;color:#334155;font-style:italic;margin-top:8px; }
 /* ── Phones ── */
 @media (max-width: 768px) {
-  .block-container { padding: 0.5rem 0.75rem 110px !important; }
+  .block-container { padding: 0.5rem 0.75rem 200px !important; }
   .st-key-ts_header { margin: -0.5rem -0.75rem 0.5rem; padding: 8px 0.75rem 6px; }
   .ts-brand .name { font-size: 16px; } .ts-brand .sub { display: none; }
   .st-key-ts_topnav { display: none; }
@@ -138,7 +139,7 @@ CLOUD_CSS = """
   .st-key-ts_header { padding-top: 44px !important; }
   /* The badge and avatar can sit anywhere along the bottom, so clear them vertically. */
   .st-key-ts_bottomnav { bottom: 62px !important; border-radius: 14px 14px 0 0; }
-  .block-container { padding-bottom: 180px !important; }
+  .block-container { padding-bottom: 240px !important; }
 }
 </style>
 """
