@@ -5056,14 +5056,14 @@ _ADMIN_PW_HASH  = "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d154
 _ADMIN_PIN_HASH = "ff7faf9dc56f2a51cc8c1e19c05e5f6609f01b89cb4e4e70e5a688d3a13d7cf9"
 
 
-_PUBLIC_PAGES = ["🏅 Scores", "🔴 Live", "⚔️ Matchups", "🎯 Odds", "📊 Backtest", "👤 Players", "🏟 Teams",
+_PUBLIC_PAGES = ["🏅 Scores", "🔴 Live", "⚔️ Matchups", "🎯 Odds", "📊 Backtest", "🏈 NFL Engine", "👤 Players", "🏟 Teams",
                  "🔔 Watch", "📈 Team Trends", "🏆 Rankings", "📰 News", "📋 Custom Views"]
 _ADMIN_PAGES = ["🌐 Network", "🔬 Schema Explorer", "🔍 Raw Inspector", "🛠 Admin Panel"]
 _PAGE_IDS = {
     "🏅 Scores": 1, "📈 Team Trends": 2, "👤 Players": 3, "🏟 Teams": 4,
     "📰 News": 5, "🏆 Rankings": 6, "🌐 Network": 7, "🔬 Schema Explorer": 8,
     "🔍 Raw Inspector": 9, "📋 Custom Views": 10, "🛠 Admin Panel": 11,
-    "💚 Support": 12, "🎯 Odds": 13, "⚔️ Matchups": 14, "⚙️ Settings": 15, "🔴 Live": 16, "📊 Backtest": 17, "🔔 Watch": 18,
+    "💚 Support": 12, "🎯 Odds": 13, "⚔️ Matchups": 14, "⚙️ Settings": 15, "🔴 Live": 16, "📊 Backtest": 17, "🔔 Watch": 18, "🏈 NFL Engine": 19,
 }
 # Each page's own league picker; the global header picker drives them all.
 _PAGE_LEAGUE_KEYS = ['sb_ep', 'trend_ep', 'pt_ep', 'teams_ep', 'news_ep', 'r5_league',
@@ -9649,6 +9649,10 @@ def main():
                    'for its live game centre. Your list is saved in this browser.')
         render_tracker(db, worker, _active_g, ESPNWorker._espn_season_year, _league_label,
                        tab='watch')
+
+    if _page == 19:
+        from nfl_engine_page import render_nfl_engine_page
+        render_nfl_engine_page()
 
     if _page == 17:
         render_backtest_page(db, g_league, _league_label, SportsDB.season_bounds)
