@@ -72,6 +72,25 @@ div[data-testid="stVerticalBlockBorderWrapper"][style*="border"] , .stContainer 
 h1, h2, h3 { letter-spacing: -.4px; color: var(--ts-ink); }
 [data-baseweb="select"] > div { border-radius: 10px !important; }
 
+/* ── Score cards ── */
+      .tsg { background:#fff;border:1px solid #e5e9f2;border-radius:16px;padding:14px 16px;
+             margin-bottom:12px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 4px 16px rgba(15,23,42,.06);
+             font-family:Inter,system-ui,sans-serif;color:#0f172a; }
+      .tsg-top { display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px; }
+      .tsg-pill { font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px; }
+      .tsg-row { display:flex;align-items:center;gap:10px;padding:5px 0; }
+      .tsg-name { flex:1;font-size:15px;min-width:0; }
+      .tsg-rec { font-size:12px;color:#94a3b8;font-weight:500;margin-left:6px; }
+      .tsg-score { font-size:24px;min-width:44px;text-align:right;font-variant-numeric:tabular-nums; }
+      .tsg-line { overflow-x:auto;margin:8px 0 2px; }
+      .tsg-line table { border-collapse:collapse;font-size:12px;color:#475569; }
+      .tsg-line th, .tsg-line td { padding:2px 8px;text-align:center; }
+      .tsg-line td:first-child, .tsg-line th:first-child { text-align:left;font-weight:600;color:#0f172a; }
+      .tsg-chips { display:flex;flex-wrap:wrap;gap:6px;margin-top:10px; }
+      .tsg-chip { font-size:12px;color:#475569;background:#f1f5f9;border-radius:999px;padding:4px 10px; }
+      .tsg-meta { font-size:12px;color:#64748b;margin-top:10px; }
+      .tsg-link { font-size:12px;font-weight:600;color:#2563eb;text-decoration:none;margin-right:12px; }
+      .tsg-head { font-size:13px;color:#334155;font-style:italic;margin-top:8px; }
 /* ── Phones ── */
 @media (max-width: 768px) {
   .block-container { padding: 0.5rem 0.75rem 110px !important; }
