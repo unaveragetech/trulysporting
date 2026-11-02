@@ -28,6 +28,15 @@ def _runtime():
     return RT
 
 
+def _runtime_started() -> bool:
+    """True once some session has already started the shared engine."""
+    try:
+        from nfl_engine.runtime import RT
+    except Exception:  # noqa: BLE001
+        return False
+    return RT.state in ("loading", "ready")
+
+
 def _ready(rt) -> bool:
     rt.ensure()
     if rt.state == "ready":
@@ -337,6 +346,12 @@ def render_nfl_engine_page() -> None:
     st.markdown("## 🏈 NFL Engine")
     st.caption("Play-by-play simulator trained on completed games. **Engine** columns are what the model predicted "
                "before the snap; **Live** columns are what actually happened. Every graded play feeds the nightly tuning job.")
+    if not st.session_state.get('nfl_engine_on') and not _runtime_started():
+        st.info("The engine loads about 12 seasons of play-by-play into memory (about a minute on first use).")
+        if st.button("Load NFL engine", type="primary"):
+            st.session_state['nfl_engine_on'] = True
+            st.rerun()
+        return
     try:
         rt = _runtime()
     except Exception as exc:  # noqa: BLE001

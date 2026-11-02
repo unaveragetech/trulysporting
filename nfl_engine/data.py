@@ -62,6 +62,19 @@ def load_games(refresh: bool = False) -> pd.DataFrame:
     return g.sort_values(["gameday", "game_id"]).reset_index(drop=True)
 
 
+def _read_season(url: str) -> pd.DataFrame:
+    """Download one season and decode only the columns we use (the full file has ~370)."""
+    import io
+
+    import pyarrow.parquet as pq
+    import requests
+
+    r = requests.get(url, timeout=120)
+    r.raise_for_status()
+    pf = pq.ParquetFile(io.BytesIO(r.content))
+    return pf.read(columns=[c for c in PBP_COLS if c in pf.schema_arrow.names]).to_pandas()
+
+
 def load_pbp(seasons: list[int], refresh: bool = False) -> pd.DataFrame:
     """Trimmed play-by-play for the given seasons (cached per season)."""
     SPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -72,8 +85,7 @@ def load_pbp(seasons: list[int], refresh: bool = False) -> pd.DataFrame:
         live = s == this_year and s >= pd.Timestamp.today().year - 1
         if refresh or not _fresh(path, 12 * 3600 if live else 10**12):
             try:
-                df = pd.read_parquet(PBP_URL.format(season=s))
-                df = df[[c for c in PBP_COLS if c in df.columns]]
+                df = _read_season(PBP_URL.format(season=s))
                 df.to_parquet(path, index=False)
             except Exception:
                 if not path.exists():
@@ -81,8 +93,7 @@ def load_pbp(seasons: list[int], refresh: bool = False) -> pd.DataFrame:
         df = pd.read_parquet(path)
         if "receiver_player_id" not in df.columns and not refresh:  # cache predates the player columns
             try:
-                df = pd.read_parquet(PBP_URL.format(season=s))
-                df = df[[c for c in PBP_COLS if c in df.columns]]
+                df = _read_season(PBP_URL.format(season=s))
                 df.to_parquet(path, index=False)
             except Exception:
                 pass

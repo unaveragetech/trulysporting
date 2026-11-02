@@ -34,8 +34,12 @@ def qb_override(book, bundle: Bundle, team_snap, qb_id: str):
 def fresh_book(bundle: Bundle, refresh: bool = False):
     games = load_games(refresh=refresh)
     games = games[games["season"] >= FIRST_SEASON].reset_index(drop=True)
-    pbp = load_pbp(list(range(FIRST_SEASON, int(games["season"].max()) + 1)), refresh=refresh)
-    tg, qbg, _ = build_observations(pbp, bundle.league)
+    tgs, qbgs = [], []
+    for season in range(FIRST_SEASON, int(games["season"].max()) + 1):  # one season at a time keeps memory small
+        tg, qbg, _ = build_observations(load_pbp([season], refresh=refresh), bundle.league)
+        tgs.append(tg)
+        qbgs.append(qbg)
+    tg, qbg = pd.concat(tgs, ignore_index=True), pd.concat(qbgs, ignore_index=True)
     return games, build_book(games, tg, qbg, bundle.rating_params)
 
 
