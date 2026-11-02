@@ -164,7 +164,63 @@ def _slate_tab(rt) -> pd.DataFrame:
     })
     st.dataframe(show, hide_index=True, use_container_width=True)
     st.caption("Calibrated Monte-Carlo projections vs the market. Exploratory analytics, not betting advice.")
+    _market_section(df)
     return df
+
+
+# ── Unabated market board ─────────────────────────────────────
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _unabated_rows(code: str):
+    import unabated
+    return unabated.summarize(unabated.nfl_game_odds(), unabated.sources(), code)
+
+
+def _fmt_line(b: Optional[dict]) -> str:
+    return "–" if not b else f"{b['price']:+d} {b['book']}"
+
+
+def _market_section(slate: pd.DataFrame) -> None:
+    import unabated
+    st.markdown("##### Market board (Unabated) vs engine")
+    if not unabated.api_key():
+        st.caption("Add `UNABATED_API_KEY` to `.streamlit/secrets.toml` (or the environment) to compare the engine with "
+                   "live sportsbook lines.")
+        return
+    code = unabated.partner_code()
+    try:
+        rows = _unabated_rows(code)
+    except Exception as exc:  # noqa: BLE001
+        st.caption(f"Unabated unavailable: {exc}")
+        return
+    model = {(r.home, r.away): r for r in slate.itertuples()} if not slate.empty else {}
+    out = []
+    for r in rows:
+        m = model.get((r["home"], r["away"]))
+        spread, total = r.get("spread"), r.get("total")
+        out.append({
+            "Matchup": f"{r['away']} @ {r['home']}", "Start": (r.get("start") or "")[:16].replace("T", " "),
+            "Mkt spread": spread, "Model spread": None if m is None else round(m.model_spread, 1),
+            "Spread edge": None if m is None or spread is None else round(m.model_spread - spread, 1),
+            "Mkt total": total, "Model total": None if m is None else round(m.model_total, 1),
+            "Best away ML": _fmt_line(r.get("ml_away")), "Best home ML": _fmt_line(r.get("ml_home")),
+            "Bet away": (r.get("ml_away") or {}).get("link"), "Bet home": (r.get("ml_home") or {}).get("link"),
+        })
+    if not out:
+        st.caption("No pre-game NFL lines returned.")
+        return
+    cfg = {}
+    if code:
+        cfg = {"Bet away": st.column_config.LinkColumn("Bet away", display_text="Open"),
+               "Bet home": st.column_config.LinkColumn("Bet home", display_text="Open")}
+    df = pd.DataFrame(out)
+    if not code:
+        df = df.drop(columns=["Bet away", "Bet home"])
+        st.caption("Sportsbook links are hidden until `UNABATED_PARTNER_CODE` is set (the code on your Unabated API keys page), "
+                   "so every link carries the required `utm_campaign` tag.")
+    st.dataframe(df, hide_index=True, use_container_width=True, column_config=cfg)
+    st.caption("Lines from Unabated, delayed at least 15 seconds; prices can move before a link is opened. "
+               "Links are Unabated's own, unchanged apart from the partner tag. Exploratory analytics, not betting advice.")
 
 
 # ── Players ───────────────────────────────────────────────────

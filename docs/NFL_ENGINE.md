@@ -83,3 +83,17 @@ as bets; check injuries and late news that the engine cannot see.
 * Playbook/scheme is represented through pass-rate-over-expected, pace and 4th-down tendencies, not
   formations or concepts.
 * NFL outcomes are noisy: even the closing market misses by ~10 points on average.
+
+## Unabated market board
+
+The Slate sub-tab also shows live sportsbook lines from [Unabated](https://docs.unabated.com): consensus spread/total
+next to the engine's, plus the best moneyline price per side. Configure in `.streamlit/secrets.toml` (never commit it) or the environment:
+
+```toml
+UNABATED_API_KEY = "..."        # server-side only, sent in the X-Api-Key header
+UNABATED_PARTNER_CODE = "..."   # the code on tools.unabated.com/api-keys
+```
+
+API rules followed: one odds request per 5 s (30 s cache, `Retry-After` honoured); deep links are Unabated's own
+`deepLink` values with only `utm_campaign` set to the partner code (existing value replaced, path untouched);
+no links are shown until a partner code is set; the key never appears in a page or link.
