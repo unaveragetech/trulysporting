@@ -44,8 +44,12 @@ def run_games(L: League, book: Book, games: pd.DataFrame, tune: Tuning, n: int =
     if workers == 1 or len(jobs) < 8:
         _init(L)
         return dict(_task(j) for j in jobs)
-    with ProcessPoolExecutor(workers, initializer=_init, initargs=(L,)) as ex:
-        return dict(ex.map(_task, jobs, chunksize=max(1, len(jobs) // (workers * 6))))
+    try:
+        with ProcessPoolExecutor(workers, initializer=_init, initargs=(L,)) as ex:
+            return dict(ex.map(_task, jobs, chunksize=max(1, len(jobs) // (workers * 6))))
+    except Exception:  # noqa: BLE001  (e.g. forkserver/pickling limits on hosted Python): just run in this process
+        _init(L)
+        return dict(_task(j) for j in jobs)
 
 
 # ---------------------------------------------------------------- summaries & metrics
