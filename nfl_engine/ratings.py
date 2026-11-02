@@ -110,7 +110,7 @@ def build_observations(pbp: pd.DataFrame, L: League) -> tuple[pd.DataFrame, pd.D
     # quarterback layer: dropbacks / scrambles credited to the game's primary passer
     d = s[s["dropback"]].copy()
     mode_pass = d[d["passer_player_id"].notna()].groupby(k)["passer_player_id"].agg(lambda x: x.mode().iat[0])
-    d["qb"] = d["passer_player_id"].fillna(d.set_index(k).index.map(mode_pass).to_series().reset_index(drop=True))
+    d["qb"] = d["passer_player_id"].fillna(pd.Series(d.set_index(k).index.map(mode_pass), index=d.index))
     d = d[d["qb"].notna()]
     kq = ["game_id", "posteam", "qb"]
     gq = d.groupby(kq)
