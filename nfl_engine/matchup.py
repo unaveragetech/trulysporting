@@ -48,7 +48,7 @@ def _wx_delta(L: League, stat: str, wx: tuple) -> float:
 
 
 def side_params(L: League, base: dict, off: Snapshot, dfn: Snapshot, wx: tuple, tune: Tuning,
-                sign: float) -> SideParams:
+                sign: float, tshift: dict | None = None) -> SideParams:
     """``sign`` = +1 home offence, -1 away offence, 0 neutral venue."""
     s = tune.dev_scale
 
@@ -70,7 +70,8 @@ def side_params(L: League, base: dict, off: Snapshot, dfn: Snapshot, wx: tuple, 
         pen_off=max(0.005, L.off_pen_rate + s * off.off["pen"] + adj("pen")),
         pen_def=max(0.005, L.def_pen_rate + s * dfn.deff["pen"] * 0.7),
         d_burn=s * off.off["burn"],
-        proe=base["proe"] + s * off.off["proe"] + LIVE_ADJ.get("pass", 0.0),
+        proe=base["proe"] + (0.0 if tshift else s * off.off["proe"]) + LIVE_ADJ.get("pass", 0.0),
+        tshift=tshift,
         go_dev=s * off.coach_go,
         fg_dev=base["fgx"] + s * off.off["fgx"],
         qb_id=off.qb_id,
@@ -83,9 +84,15 @@ def make_spec(row, book: Book, L: League, tune: Tuning) -> GameSpec:
     wx = weather_of(row)
     neutral = getattr(row, "location", "Home") == "Neutral"
     h, a = snaps["home"], snaps["away"]
+    tend = getattr(book, "tend", None)
+    ths = (None, None)
+    if tend is not None:
+        day = getattr(row, "gameday", None)
+        ths = (tend.shifts(row.home_team, row.away_team, row.game_id, day),
+               tend.shifts(row.away_team, row.home_team, row.game_id, day))
     sides = (
-        side_params(L, base, h, a, wx, tune, 0.0 if neutral else 1.0),
-        side_params(L, base, a, h, wx, tune, 0.0 if neutral else -1.0),
+        side_params(L, base, h, a, wx, tune, 0.0 if neutral else 1.0, ths[0]),
+        side_params(L, base, a, h, wx, tune, 0.0 if neutral else -1.0, ths[1]),
     )
     return GameSpec(home=row.home_team, away=row.away_team, sides=sides, wind_ex=wx[0], cold=wx[1], dome=wx[2],
                     season=int(row.season), playoff=str(getattr(row, "game_type", "REG")) != "REG")

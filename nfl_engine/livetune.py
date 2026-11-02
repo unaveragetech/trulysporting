@@ -133,6 +133,9 @@ def nightly(runtime, force: bool = False) -> dict:
     entry: dict = {"started": datetime.now().isoformat(timespec="seconds")}
     try:
         entry["live"] = tune_from_logs()
+        from nfl_engine import ingame
+
+        entry["ingame"] = ingame.refit_from_ledger()
         entry["refresh"] = runtime.refresh_after_games()
         entry["status"] = "ok"
     except Exception as exc:  # noqa: BLE001

@@ -97,3 +97,32 @@ UNABATED_PARTNER_CODE = "..."   # the code on tools.unabated.com/api-keys
 API rules followed: one odds request per 5 s (30 s cache, `Retry-After` honoured); deep links are Unabated's own
 `deepLink` values with only `utm_campaign` set to the partner code (existing value replaced, path untouched);
 no links are shown until a partner code is set; the key never appears in a page or link.
+
+## Team dynamics (play-calling model)
+
+`tracking.py` joins every snap with nflverse participation (formation, personnel, box count, coverage, pressure).
+`tendencies.py` tracks, per team *and per defense*, how often each did something unexpected in each situation
+(down & distance, score & period, field zone, and what the previous snap was), chronologically with decay and
+shrinkage so a game only sees earlier games. The simulator's play-call is now a gradient-boosted table
+(held-out log loss 0.538 vs 0.565 for the old logistic) plus those team shifts; `TendBook.update` folds in new
+games nightly. `dynamics.py` powers the **Team dynamics** tab: coach decisions (4th-down, 2-pt, timeouts, tempo),
+calls by situation, calls in response to the last play, personnel / coverage, player usage trends, recent meetings.
+Honest result: better play-level realism, but game-level accuracy is unchanged (win acc 65.1%, margin MAE 10.05).
+
+### Next-play prediction and the 5-play projection
+
+`nextplay.py` answers "what will they do next?" for a live game. Held-out check on 2024-25 plays (208k snaps):
+
+| Predictor | Pass/run log loss | Accuracy |
+|---|---|---|
+| League situation model (gradient-boosted) | 0.5375 | 70.5% |
+| + each team's and defense's tracked tendencies (engine pre-snap call) | 0.5323 | 71.1% |
+| + this offense's behaviour earlier in the same game | 0.5311 | 71.1% |
+| + previous two calls / last 6 plays | no gain | |
+| + history of the same two teams meeting | no gain (weight 0.00) | |
+
+So the live call uses the tendency model plus the in-game script term; past matchups are displayed but not used.
+The ceiling without seeing the formation is roughly 71-72% (knowing shotgun / no-huddle before the snap would reach ~74%).
+The Live tab projects the next five plays by simulating the rest of the game 800 times from the current state
+(probability of pass / run / punt / FG at each step, expected yards, first-down and turnover odds, most likely
+sequences). Every projection is stored and graded once those plays have been played (Nightly tuning tab).

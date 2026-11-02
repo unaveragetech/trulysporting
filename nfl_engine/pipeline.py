@@ -35,6 +35,7 @@ class Bundle:
     train_end: int
     trained_at: str = ""
     report: dict = field(default_factory=dict)
+    tend: object = None  # TendBook: situational play-call tendencies
 
 
 def _log(msg: str) -> None:
@@ -66,11 +67,23 @@ def train(train_end: int = 2023, cal_years: int = 3, n_search: int = 60, n_cal: 
     test_games = pl[pl["season"] > train_end]
     _log(f"data ready: {len(pl)} completed games; calibrate on {len(cal_games)}, test on {len(test_games)}")
 
+    from nfl_engine.tendencies import TendBook, context_frame
+
+    _log("building situational tendencies (rich play data)")
+    tend = TendBook(hist_from=FIRST_SEASON)
+    tend.build(context_frame(L, range(FIRST_SEASON, int(games["season"].max()) + 1), refresh=refresh), games,
+               fit_seasons=(FIRST_SEASON + 2, train_end))
+    _log("tendency weights " + ", ".join(f"{s}.{f}={w:.2f}" for (s, f), w in sorted(tend.coef.items())))
+
+    def with_tend(bk):
+        bk.tend = tend
+        return bk
+
     P = RatingParams()
     tune = Tuning(hfa=1.2, eff=0.6)
 
     def corr_for(params: RatingParams, tn: Tuning) -> float:
-        bk = build_book(games, tg, qbg, params)
+        bk = with_tend(build_book(games, tg, qbg, params))
         return _score(summarize(run_games(L, bk, cal_games, tn, n=n_search), cal_games))
 
     if search:
@@ -96,7 +109,7 @@ def train(train_end: int = 2023, cal_years: int = 3, n_search: int = 60, n_cal: 
             if not moved:
                 break
         _log(f"chosen rating params {asdict(P)} corr={best:.4f}")
-    book = build_book(games, tg, qbg, P)
+    book = with_tend(build_book(games, tg, qbg, P))
 
     # --- solve home-field and efficiency levers so league margin/total match reality
     def means(tn: Tuning, n: int):
@@ -167,7 +180,7 @@ def train(train_end: int = 2023, cal_years: int = 3, n_search: int = 60, n_cal: 
         report["test_calibration_table"] = calibration_table(test_df, cal)
         report["box_realism"] = box_realism(res, test_games, tg)
         test_df.to_csv(SPORTS_DIR / "backtest_games.csv", index=False)
-    bundle = Bundle(L, P, tune, cal, cal_raw, resbook, train_end, time.strftime("%Y-%m-%d %H:%M"), report)
+    bundle = Bundle(L, P, tune, cal, cal_raw, resbook, train_end, time.strftime("%Y-%m-%d %H:%M"), report, tend)
     with open(MODEL_PATH, "wb") as f:
         pickle.dump(bundle, f)
     (SPORTS_DIR / "report.json").write_text(json.dumps(report, indent=2, default=float), encoding="utf-8")

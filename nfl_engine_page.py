@@ -104,6 +104,41 @@ def _play_rows(plays: list) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _project_cached(_rt, event: str, last_seq: int, home: str, away: str, state_key: tuple, ig: float):
+    from nfl_engine import nextplay
+    row, spec, _p = _rt.predictor(home, away)
+    state = dict(zip(("down", "ytg", "yl", "poss", "hs", "as", "gsr", "first_recv"), state_key))
+    return nextplay.project(_rt.bundle.league, spec, state, 5, 800, ig)
+
+
+def _next_plays_panel(rt, g, spec, log, parsed) -> None:
+    """Likely next call and the engine's projection of the next five plays from the live state."""
+    from nfl_engine import liveplay, nextplay
+    state = liveplay.state_from_plays(parsed)
+    if state is None:
+        return
+    off = spec.home if state["poss"] == 0 else spec.away
+    ig = nextplay.team_ig(log, off)
+    last_seq = max((p["seq"] for p in log["plays"].values()), default=0)
+    key = (state["down"], state["ytg"], state["yl"], state["poss"], state["hs"], state["as"], round(state["gsr"]), state["first_recv"])
+    proj = _project_cached(rt, g["event"], last_seq, g["home"], g["away"], key, round(ig, 3))
+    nextplay.record_projection(g["event"], last_seq, proj)
+    s1 = proj["steps"][0]
+    st.markdown(f"##### Next 5 plays: {off} with the ball, {state['down']} & {state['ytg']} at the "
+                f"{'opp ' if state['yl'] <= 50 else 'own '}{state['yl'] if state['yl'] <= 50 else 100 - state['yl']}")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Next play: pass", _pct(s1["p_pass"]), f"run {_pct(s1['p_run'])}")
+    c2.metric("This game's script", f"{100 * ig:+.1f} pts", "passing more than expected" if ig > 0.02 else "running more than expected" if ig < -0.02 else "as expected")
+    c3.metric("First down on next play", _pct(s1["p_first_down"]), f"{_num(s1['exp_yards'])} yds expected")
+    df = pd.DataFrame([{"Play": f"+{s['play']}", "Pass": _pct(s["p_pass"]), "Run": _pct(s["p_run"]), "Punt": _pct(s["p_punt"]),
+                        "FG": _pct(s["p_fg"]), "Exp yds": _num(s["exp_yards"]), "Turnover": _pct(s["p_turnover"], 1),
+                        "Same offense": _pct(s["p_same_offense"])} for s in proj["steps"]])
+    st.dataframe(df, hide_index=True, use_container_width=True)
+    st.caption("Most likely sequences: " + " · ".join(f"{q['sequence']} ({_pct(q['prob'])})" for q in proj["sequences"][:4])
+               + f". Based on {proj['sims']} simulated finishes; P = pass, R = run.")
+
+
 def _live_body(rt) -> None:
     from nfl_engine import liveplay
     games = _scoreboard()
@@ -128,8 +163,19 @@ def _live_body(rt) -> None:
     log = liveplay.process_event(g["event"], pred, spec, g["home"])
     summ = liveplay.summarize_log(log)
     c1, c2, c3 = st.columns(3)
+    from nfl_engine import ingame
+    parsed = log["_plays_parsed"]
+    if g["state"] == "post":
+        ingame.record(g["event"], 0.0, 0.5, 0.5, int(g["home_score"]), int(g["away_score"]), final=True)
     if g["state"] == "in":
-        c1.metric("Engine home win", _pct(liveplay.live_win_prob(rt.bundle.league, spec, log["_plays_parsed"], 250)))
+        raw = liveplay.live_win_prob(rt.bundle.league, spec, parsed, 250, calibrated=False)
+        cal = None
+        if raw is not None and parsed:
+            gsr = parsed[-1]["gsr"]
+            pm = ingame.mkt_prob(getattr(row, "spread_line", None))
+            cal = ingame.IngameCal.load().apply(raw, gsr, pm)
+            ingame.record(g["event"], gsr, raw, cal, int(g["home_score"]), int(g["away_score"]), p_mkt=pm)
+        c1.metric("Engine home win", _pct(cal), f"raw sim {_pct(raw)}")
         try:
             wp = liveplay._get(f"{liveplay.ESPN}/summary?event={g['event']}", 20).get("winprobability") or []
             c2.metric("ESPN home win", _pct(wp[-1]["homeWinPercentage"]) if wp else "–")
@@ -137,7 +183,12 @@ def _live_body(rt) -> None:
             c2.metric("ESPN home win", "–")
     c3.metric("Plays graded", summ.get("n", 0), f"avg surprise {_num(summ.get('mean_surprise'), 2)}")
     if summ.get("n"):
+        st.caption(f"Pass/run call predicted correctly on {_pct(summ['call_acc'], 0)} of snaps (log loss {summ['call_ll']:.3f}; "
+                   "pre-game benchmark 71% / 0.53 on 2024-25 plays).")
+    if summ.get("n"):
         _summary_table(summ)
+    if g["state"] == "in":
+        _next_plays_panel(rt, g, spec, log, parsed)
     plays = sorted(log["plays"].values(), key=lambda p: -p["seq"])[:300]
     df = _play_rows(plays)
     if df.empty:
@@ -269,6 +320,7 @@ def _players_tab(rt, slate: pd.DataFrame) -> None:
     sims = c4.select_slider("Simulations", [200, 400, 800], value=400)
     if not st.button("Simulate matchup", type="primary"):
         return
+    from support import support_nudge
     qbs = (_row.home_qb_name or "QB", _row.away_qb_name or "QB")
     with st.spinner(f"Simulating {sims} games twice (baseline vs spotlight)…"):
         base = project_players(rt.bundle.league, spec, rt.players, home, away, qbs, n=sims, seed=1)
@@ -300,6 +352,7 @@ def _players_tab(rt, slate: pd.DataFrame) -> None:
         "Tgt": _num(tot(p, "targets")) if tot(p, "targets") else "",
         "TD": _num(tot(p, "rec_td") + tot(p, "rush_td") + tot(p, "pass_td"), 2)} for p in top]),
         hide_index=True, use_container_width=True)
+    support_nudge("matchup")
 
 
 # ── Tuning ────────────────────────────────────────────────────
@@ -323,6 +376,31 @@ def _tuning_tab(rt) -> None:
         else:
             with st.spinner("Running tuning job…"):
                 st.json(livetune.nightly(rt, force=True))
+    from nfl_engine import ingame
+    st.markdown("##### Live win-probability accuracy")
+    lr = ingame.live_report()
+    if lr.get("games"):
+        st.caption(f"{lr['games']} finished games graded ({lr['states']} checkpoints): calibrated Brier "
+                   f"{lr['cal']['brier']:.3f}, leader-wins accuracy {_pct(lr['cal']['acc'], 1)} (raw sim {lr['raw']['brier']:.3f}). "
+                   "The calibrator refits every night from these.")
+    else:
+        st.caption("No finished games graded yet. Every live reading is logged and graded when the game ends.")
+    if lr.get("misses"):
+        st.markdown("Confidently wrong (>80% for the side that lost):")
+        st.dataframe(pd.DataFrame(lr["misses"]), hide_index=True)
+    import pathlib
+    md = pathlib.Path(__file__).parent / "docs" / "NFL_ENGINE_INGAME.md"
+    if md.exists():
+        with st.expander("Historical in-game backtest (held-out seasons)"):
+            st.markdown(md.read_text(encoding="utf-8"))
+    from nfl_engine import nextplay
+    gp = nextplay.grade_projections()
+    st.markdown("##### Next-5-plays accuracy (graded after the plays happen)")
+    if gp:
+        st.dataframe(pd.DataFrame([{"Plays ahead": k, "Predictions graded": v["n"], "Top call right": _pct(v["top_call_acc"]),
+                                    "Log loss": round(v["logloss"], 3)} for k, v in gp.items()]), hide_index=True)
+    else:
+        st.caption("Nothing graded yet. Each live projection is saved and scored once the plays after it have been played.")
     st.markdown("##### Live corrections applied to every simulation")
     adj = dict(livetune.LIVE_ADJ)
     if adj:
@@ -338,6 +416,121 @@ def _tuning_tab(rt) -> None:
                                     "Seconds": h.get("seconds")} for h in hist]), hide_index=True)
     else:
         st.caption("No runs yet.")
+
+
+# ── Team dynamics ─────────────────────────────────────────────
+
+@st.cache_resource(show_spinner=False)
+def _dyn_ctx(season: int):
+    """Two seasons of rich play data with situation classes (kept in memory once for every session)."""
+    from nfl_engine import dynamics
+    from nfl_engine.runtime import RT
+    return dynamics.load_context(RT.bundle.league, [season - 1, season])
+
+
+def _dynamics_tab(rt) -> None:
+    from nfl_engine import dynamics as D
+    from nfl_engine.league import RESP_IDX
+    from nfl_engine.sim import Engine, GameSpec, SideParams
+
+    games = rt.games
+    season = int(games["season"].max())
+    teams = sorted(set(games["home_team"]) | set(games["away_team"]))
+    c1, c2 = st.columns(2)
+    a = c1.selectbox("Team", teams, index=teams.index("KC") if "KC" in teams else 0, key="nfl_dyn_a")
+    b = c2.selectbox("Opponent (for the matchup views)", [t for t in teams if t != a], key="nfl_dyn_b")
+    with st.spinner("Loading play-by-play tracking data…"):
+        ctx = _dyn_ctx(season)
+
+    st.markdown(f"##### What will {a} do? (engine call prediction vs {b}'s defense)")
+    k1, k2, k3, k4, k5 = st.columns(5)
+    down = k1.selectbox("Down", [1, 2, 3, 4], index=2)
+    ytg = k2.number_input("Yards to go", 1, 30, 7)
+    yl = k3.number_input("Yards to end zone", 1, 99, 55)
+    sd = k4.number_input("Score margin (A minus B)", -30, 30, 0)
+    gsr = k5.number_input("Game seconds left", 0, 3600, 1500)
+    resp = st.select_slider("What just happened", list(RESP_IDX), value="open",
+                            format_func=lambda x: {"open": "start of drive", "loss": "loss / sack", "incomplete": "incomplete pass",
+                                                   "short": "short gain (0-3)", "medium": "medium gain (4-9)", "big": "big gain (10+)",
+                                                   "penalty": "penalty"}[x])
+    L, tend = rt.bundle.league, rt.bundle.tend
+    qtr = 1 if gsr > 2700 else 2 if gsr > 1800 else 3 if gsr > 900 else 4
+    hsr = gsr - 1800 if gsr > 1800 else gsr
+    base_o = SideParams(proe=0.0)
+    eng0 = Engine(L, GameSpec(home=a, away=b, sides=(base_o, base_o)))
+    p_lg = eng0._pass_prob(base_o, down, ytg, yl, sd, qtr, hsr, gsr, 0, RESP_IDX[resp])
+    sh = tend.shifts(a, b, "upcoming", pd.Timestamp.today()) if tend is not None else None
+    o = SideParams(proe=0.0, tshift=sh)
+    p_a = eng0._pass_prob(o, down, ytg, yl, sd, qtr, hsr, gsr, 0, RESP_IDX[resp])
+    m1, m2, m3 = st.columns(3)
+    m1.metric(f"{a} pass", _pct(p_a), f"{100 * (p_a - p_lg):+.1f} pts vs league")
+    m2.metric(f"{a} run", _pct(1 - p_a))
+    m3.metric("League-average pass", _pct(p_lg))
+
+    with st.expander(f"Pass / run map: when does {a} throw against {b}?", expanded=True):
+        def grid(rows, cols, fn):
+            return pd.DataFrame({c: [fn(r, c) for r in rows] for c in cols}, index=rows)
+        yt = [1, 2, 3, 5, 7, 10, 15]
+        pm = lambda dn, y, **kw: eng0._pass_prob(o, dn, y, kw.get("yl", yl), kw.get("sd", sd), kw.get("qtr", qtr), kw.get("hsr", hsr),
+                                                 kw.get("gsr", gsr), 0, RESP_IDX[resp])
+        st.markdown(f"**By down and distance** (field position, score, clock and last play as set above). Pass %:")
+        g1 = grid([1, 2, 3, 4], yt, lambda dn, y: round(100 * pm(dn, y), 0)).rename_axis("down")
+        g1.columns = [f"{y} to go" for y in yt]
+        st.dataframe(g1, use_container_width=True)
+        st.markdown("**By score margin and time left** (3rd & 6 at the same spot). Pass %:")
+        sds, ts = [-14, -7, -3, 0, 3, 7, 14], [3000, 2400, 1800, 1200, 600, 300, 120]
+        def f2(sdv, tv):
+            q = 1 if tv > 2700 else 2 if tv > 1800 else 3 if tv > 900 else 4
+            return round(100 * pm(3, 6, sd=sdv, gsr=tv, qtr=q, hsr=tv - 1800 if tv > 1800 else tv), 0)
+        g2 = grid(sds, ts, f2).rename_axis(f"{a} margin")
+        g2.columns = [f"{t // 60}:{t % 60:02d} left" for t in ts]
+        st.dataframe(g2, use_container_width=True)
+        st.caption(f"Engine probabilities for {a} against {b}'s defense: league situation model, shifted by each team's tracked "
+                   "tendencies in that situation and by what the last play was.")
+    with st.expander(f"Coach decisions ({a} vs league)", expanded=True):
+        ct = D.coach_decisions(ctx)
+        row, lg = ct.loc[a], ct.drop(columns=[c for c in ct if c.endswith("_vs_lg")] + ["games", "kneels", "4th_downs"]).mean()
+        keep = [c for c in ct.columns if not c.endswith("_vs_lg") and c not in ("games", "kneels", "4th_downs")]
+        st.dataframe(pd.DataFrame({"decision": keep, a: [row[c] for c in keep], "league": [lg[c] for c in keep],
+                                   "diff": [row[c] - lg[c] for c in keep]}).round(3), hide_index=True, use_container_width=True)
+        st.caption(f"{int(row['4th_downs'])} fourth downs and {int(row['games'])} games in the last two seasons. Go rate counts "
+                   "going for it vs punting or kicking. Timeouts are the team's own per game.")
+    with st.expander("Play calling by situation"):
+        fam = st.radio("Situation", ["dd", "sc", "zone", "resp"], horizontal=True, key="nfl_dyn_fam",
+                       format_func=lambda x: {"dd": "down & distance", "sc": "score & period", "zone": "field zone", "resp": "after what"}[x])
+        t1, t2 = st.columns(2)
+        t1.markdown(f"**{a} offense** (pass %)")
+        t1.dataframe(D.situational(ctx, a, fam), use_container_width=True)
+        t2.markdown(f"**{b} defense** (pass % faced)")
+        t2.dataframe(D.situational(ctx, b, fam, "def"), use_container_width=True)
+    with st.expander("What they run in response to what just happened"):
+        st.dataframe(D.response_matrix(ctx, a), use_container_width=True)
+        st.caption("Rows: the previous snap of the same drive. Columns: share of the next call, then the gap to the league.")
+    with st.expander("Formations, personnel and coverage"):
+        pp = D.personnel_profile(ctx, a)
+        if pp.empty:
+            st.caption("Participation data (formation / personnel) is not published for this season yet.")
+        else:
+            st.markdown(f"**{a} personnel groups** (RBs then TEs on the field: 11 = 1 RB, 1 TE)")
+            st.dataframe(pp, use_container_width=True)
+        dp = D.defense_profile(ctx, b)
+        if dp:
+            st.markdown(f"**{b} defense**")
+            st.json(dp)
+    with st.expander(f"Player usage ({a})"):
+        pu = D.player_usage(ctx, a)
+        st.dataframe(pu, hide_index=True, use_container_width=True) if not pu.empty else st.caption("No usage data.")
+    with st.expander(f"Recent meetings: {a} vs {b}"):
+        h = D.head_to_head(ctx, games, a, b)
+        st.dataframe(h, hide_index=True, use_container_width=True) if not h.empty else st.caption("No recent meetings in the data window.")
+        m = ctx[ctx["scrim"] & (ctx["posteam"] == a) & (ctx["defteam"] == b)]
+        if len(m):
+            lgm = ctx[ctx["scrim"] & (ctx["posteam"] == a)].groupby("dd")["is_pass"].mean()
+            mm = m.groupby("dd")["is_pass"].agg(["mean", "count"])
+            st.dataframe(pd.DataFrame({"plays": mm["count"], f"{a} pass % vs {b}": 100 * mm["mean"],
+                                       f"{a} pass % vs everyone": 100 * lgm.reindex(mm.index)}).round(1), use_container_width=True)
+        st.caption("Tested on 2024-25 plays: knowing how a team behaved in earlier meetings with the same opponent did not improve "
+                   "pass/run prediction beyond its general tendencies, so the engine does not use it. Shown for context.")
 
 
 # ── Entry point ───────────────────────────────────────────────
@@ -364,12 +557,15 @@ def render_nfl_engine_page() -> None:
     st.caption(f"Model trained through {b.train_end}"
                + (f" · held-out win accuracy {_pct(test.get('win_acc'), 1)} · margin MAE {_num(test.get('margin_mae'), 2)}" if test else "")
                + f" · loaded {rt.loaded_at}")
-    t_live, t_slate, t_players, t_tune = st.tabs(["Live: engine vs actual", "Slate", "Player matchups", "Nightly tuning"])
+    t_live, t_slate, t_players, t_dyn, t_tune = st.tabs(["Live: engine vs actual", "Slate", "Player matchups", "Team dynamics",
+                                                        "Nightly tuning"])
     with t_live:
         _live_fragment(rt)
     with t_slate:
         slate = _slate_tab(rt)
     with t_players:
         _players_tab(rt, rt.slate())
+    with t_dyn:
+        _dynamics_tab(rt)
     with t_tune:
         _tuning_tab(rt)

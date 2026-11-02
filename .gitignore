@@ -31,3 +31,5 @@ data/nfl_engine/*
 !data/nfl_engine/report.json
 !data/nfl_engine/pbp_20[12]?.parquet
 data/nfl_engine/pbp_2026.parquet
+!data/nfl_engine/ingame_cal.json
+!data/nfl_engine/ingame_states.csv

@@ -36,6 +36,8 @@ PBP_COLS = [
     "rusher_player_name", "sack_player_id", "sack_player_name", "pass_defense_1_player_id",
     "pass_defense_1_player_name", "interception_player_id", "interception_player_name",
     "yards_after_catch", "game_date",
+    # live-state benchmark and scoring
+    "home_wp", "total_home_score", "total_away_score",
 ]
 
 
@@ -91,7 +93,7 @@ def load_pbp(seasons: list[int], refresh: bool = False) -> pd.DataFrame:
                 if not path.exists():
                     continue
         df = pd.read_parquet(path)
-        if "receiver_player_id" not in df.columns and not refresh:  # cache predates the player columns
+        if ("receiver_player_id" not in df.columns or "home_wp" not in df.columns) and not refresh:  # cache predates the player columns
             try:
                 df = _read_season(PBP_URL.format(season=s))
                 df.to_parquet(path, index=False)

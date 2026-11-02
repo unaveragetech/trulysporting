@@ -15,7 +15,7 @@ import random
 from dataclasses import dataclass
 
 from nfl_engine.league import (
-    GSR_IDX, SD_IDX, YTG_MAX, League, clock_mode, pc_feats, punt_bin, ytg_bucket, zone)
+    GSR_IDX, PC_GSR_IDX, PC_YTG, SD_IDX, YL_IDX, YTG_MAX, League, clock_mode, pc_feats, punt_bin, ytg_bucket, zone)
 
 
 @dataclass
@@ -32,6 +32,7 @@ class SideParams:
     pen_def: float = 0.028  # by the defence facing this offence
     d_burn: float = 0.0
     proe: float = 0.0
+    tshift: dict | None = None  # situational play-call tendencies (logit shifts): {"all": x, "dd": {..}, "sc": .., "zone": .., "resp": ..}
     go_dev: float = 0.0
     fg_dev: float = 0.0
     qb_id: str | None = None
@@ -53,6 +54,7 @@ class GameSpec:
 RET_TD_KICK = 0.006  # kickoff return touchdowns per kickoff
 RET_TD_PUNT = 0.005
 FUM_RET_TD = 0.09
+RESP_NAMES = ("open", "loss", "incomplete", "short", "medium", "big", "penalty")
 
 
 def _sigmoid(x: float) -> float:
@@ -65,6 +67,8 @@ class Engine:
         self.sides = spec.sides
         self.pc_w = L.pc_model.coef_[0].tolist()
         self.pc_b = float(L.pc_model.intercept_[0])
+        self.pg = L.pass_grid
+        self.wx_off = sum(w * (x - m) for w, x, m in zip(L.pass_wx, (spec.wind_ex, spec.cold, spec.dome), L.wx_mean))
         self.fg_w = L.fg_model.coef_[0].tolist()
         self.fg_b = float(L.fg_model.intercept_[0])
         self.grid = L.fourth_grid
@@ -84,12 +88,26 @@ class Engine:
         z = self.fg_b + sum(a * b for a, b in zip(self.fg_w, x))
         return min(0.995, max(0.02, _sigmoid(z) + fg_dev))
 
-    def _pass_prob(self, o: SideParams, down, ytg, yl, sd, qtr, hsr, gsr, mode) -> float:
-        x = pc_feats(down, ytg, yl, sd, qtr, hsr, gsr, self.wx[0], self.wx[1], self.wx[2])
-        z = self.pc_b
-        for a, b in zip(self.pc_w, x):
-            z += a * b
-        p = _sigmoid(z)
+    def _pass_prob(self, o: SideParams, down, ytg, yl, sd, qtr, hsr, gsr, mode, resp: int = 0) -> float:
+        if self.pg is not None:
+            pg = float(self.pg[min(down, 4) - 1, min(max(ytg, 1), PC_YTG) - 1, YL_IDX[max(0, min(100, int(yl)))],
+                               SD_IDX[max(-30, min(30, int(sd))) + 30], PC_GSR_IDX[int(max(0, min(3600, gsr)) // 10)], resp])
+            z = math.log(max(pg, 1e-4) / max(1 - pg, 1e-4)) + self.wx_off
+            sh = o.tshift
+            if sh is not None and mode == 0:
+                z += sh["all"]
+                z += sh["dd"].get("1" if down == 1 else f"{min(down, 4)}{'s' if ytg <= 3 else 'm' if ytg <= 7 else 'l'}", 0.0)
+                z += sh["sc"].get((("L2" if sd >= 9 else "L1" if sd >= 1 else "T0" if sd == 0 else "T1" if sd >= -8 else "T2")
+                                   + ("q4" if qtr >= 4 else "q3" if qtr >= 3 else "h1")), 0.0)
+                z += sh["zone"].get("own" if yl >= 80 else "mid" if yl >= 50 else "opp" if yl >= 21 else "rz" if yl >= 11 else "gl", 0.0)
+                z += sh["resp"].get(RESP_NAMES[resp], 0.0)
+            p = _sigmoid(z)
+        else:
+            x = pc_feats(down, ytg, yl, sd, qtr, hsr, gsr, self.wx[0], self.wx[1], self.wx[2])
+            z = self.pc_b
+            for a, b in zip(self.pc_w, x):
+                z += a * b
+            p = _sigmoid(z)
         if mode == 0:
             p += o.proe
         return min(0.985, max(0.015, p))
@@ -251,6 +269,7 @@ class Engine:
         if yl <= 0:  # return touchdown
             return "TD", None, p
         down, ytg = down0, (ytg0 if ytg0 else min(10, yl))
+        resp = 0  # what the previous snap of this drive was (see league.RESP_LABELS)
         hk = self.hook
         while True:
             gsr = self.gsr
@@ -264,6 +283,8 @@ class Engine:
             # ---- fourth down
             if down == 4:
                 act = self._fourth(o, yl, ytg, sd, gsr)
+                if act in ("fg", "punt") and self.trace is not None:
+                    self.trace.append((down, ytg, yl, 0, act, p))
                 if act == "fg":
                     return self._field_goal(p, o, yl)
                 if act == "punt":
@@ -301,10 +322,11 @@ class Engine:
                     if ytg <= 0 or (auto and r() < 0.5):
                         down, ytg = 1, min(10, yl)
                 self._burn(mode, "pen", o)
+                resp = 6
                 continue
 
             # ---- snap
-            ppass = self._pass_prob(o, down, ytg, yl, sd, qtr, hsr, gsr, mode)
+            ppass = self._pass_prob(o, down, ytg, yl, sd, qtr, hsr, gsr, mode, resp)
             z, b = zone(yl), ytg_bucket(ytg)
             rt = L.rates[(z, b)]
             st["plays"][p] += 1
@@ -338,6 +360,8 @@ class Engine:
                     if u2 < p_int:
                         if hk:
                             hk.interception(p, tgt, cov)
+                        if self.trace is not None:
+                            self.trace.append((down, ytg, yl, 0, "int", p))
                         return self._interception(p, yl, mode, o)
                     if u2 < p_int + p_comp:
                         pool = L.comp_pool[(z, b)]
@@ -358,10 +382,11 @@ class Engine:
                 y = yl
             elif y >= yl:
                 y = yl - 1
+            resp = 1 if (kind == "sack" or y < 0) else 2 if kind == "inc" else 3 if y <= 3 else 4 if y <= 9 else 5
 
             self._burn(mode, cat, o)
             if self.trace is not None:
-                self.trace.append((down, ytg, yl, y, kind))
+                self.trace.append((down, ytg, yl, y, kind, p))
             if kind in ("comp",):
                 st["pass_yds"][p] += y
             elif kind in ("run", "scr"):
