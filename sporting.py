@@ -5395,6 +5395,11 @@ def main():
                 st.warning('Some fetches failed:\n' + '\n'.join(sync_errors[:5]))
             else:
                 st.success("Sync complete!")
+                try:
+                    from support import support_nudge
+                    support_nudge("sync")
+                except Exception:
+                    pass
 
 
         st.divider()
@@ -9595,7 +9600,11 @@ def main():
 
     # ── TAB 12: SUPPORT / DONATE ───────────────────────────────
     if _page == 12:
-        _render_donation_page()
+        try:
+            from support import render_support_page
+            render_support_page()
+        except Exception:  # never let the new page take the donate button down
+            _render_donation_page()
 
     if _page == 13:
         render_odds_page(db)

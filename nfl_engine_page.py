@@ -320,6 +320,7 @@ def _players_tab(rt, slate: pd.DataFrame) -> None:
     sims = c4.select_slider("Simulations", [200, 400, 800], value=400)
     if not st.button("Simulate matchup", type="primary"):
         return
+    from support import support_nudge
     qbs = (_row.home_qb_name or "QB", _row.away_qb_name or "QB")
     with st.spinner(f"Simulating {sims} games twice (baseline vs spotlight)…"):
         base = project_players(rt.bundle.league, spec, rt.players, home, away, qbs, n=sims, seed=1)
@@ -351,6 +352,7 @@ def _players_tab(rt, slate: pd.DataFrame) -> None:
         "Tgt": _num(tot(p, "targets")) if tot(p, "targets") else "",
         "TD": _num(tot(p, "rec_td") + tot(p, "rush_td") + tot(p, "pass_td"), 2)} for p in top]),
         hide_index=True, use_container_width=True)
+    support_nudge("matchup")
 
 
 # ── Tuning ────────────────────────────────────────────────────
