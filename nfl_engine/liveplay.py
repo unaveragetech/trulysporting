@@ -337,8 +337,12 @@ def summarize_log(log: dict) -> dict:
     }
 
 
-def live_win_prob(L, spec: GameSpec, plays: list[dict], sims: int = 300) -> float | None:
-    """Engine's current home win probability from the latest game state (regulation only)."""
+def live_win_prob(L, spec: GameSpec, plays: list[dict], sims: int = 300, calibrated: bool = True,
+                  p_mkt: float | None = None) -> float | None:
+    """Engine's current home win probability from the latest game state (regulation only).
+
+    ``calibrated`` applies the in-game calibrator fitted by ``python -m nfl_engine ingame`` and refit nightly.
+    """
     last = next((p for p in reversed(plays) if p["cat"] != "other" or p["down"]), None)
     if last is None or not plays:
         return None
@@ -357,4 +361,9 @@ def live_win_prob(L, spec: GameSpec, plays: list[dict], sims: int = 300) -> floa
     for _ in range(sims):
         r = eng.run_from(rnd, (hs, as_), max(gsr, 1), pos_side, int(yl), int(down), int(ytg), fr)
         w += 1.0 if r["home"] > r["away"] else 0.5 if r["home"] == r["away"] else 0.0
-    return w / sims
+    p = w / sims
+    if calibrated:
+        from nfl_engine.ingame import IngameCal
+
+        return IngameCal.load().apply(p, gsr, p_mkt)
+    return p

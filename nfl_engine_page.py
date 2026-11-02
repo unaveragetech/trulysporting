@@ -128,8 +128,19 @@ def _live_body(rt) -> None:
     log = liveplay.process_event(g["event"], pred, spec, g["home"])
     summ = liveplay.summarize_log(log)
     c1, c2, c3 = st.columns(3)
+    from nfl_engine import ingame
+    parsed = log["_plays_parsed"]
+    if g["state"] == "post":
+        ingame.record(g["event"], 0.0, 0.5, 0.5, int(g["home_score"]), int(g["away_score"]), final=True)
     if g["state"] == "in":
-        c1.metric("Engine home win", _pct(liveplay.live_win_prob(rt.bundle.league, spec, log["_plays_parsed"], 250)))
+        raw = liveplay.live_win_prob(rt.bundle.league, spec, parsed, 250, calibrated=False)
+        cal = None
+        if raw is not None and parsed:
+            gsr = parsed[-1]["gsr"]
+            pm = ingame.mkt_prob(getattr(row, "spread_line", None))
+            cal = ingame.IngameCal.load().apply(raw, gsr, pm)
+            ingame.record(g["event"], gsr, raw, cal, int(g["home_score"]), int(g["away_score"]), p_mkt=pm)
+        c1.metric("Engine home win", _pct(cal), f"raw sim {_pct(raw)}")
         try:
             wp = liveplay._get(f"{liveplay.ESPN}/summary?event={g['event']}", 20).get("winprobability") or []
             c2.metric("ESPN home win", _pct(wp[-1]["homeWinPercentage"]) if wp else "–")
@@ -323,6 +334,23 @@ def _tuning_tab(rt) -> None:
         else:
             with st.spinner("Running tuning job…"):
                 st.json(livetune.nightly(rt, force=True))
+    from nfl_engine import ingame
+    st.markdown("##### Live win-probability accuracy")
+    lr = ingame.live_report()
+    if lr.get("games"):
+        st.caption(f"{lr['games']} finished games graded ({lr['states']} checkpoints): calibrated Brier "
+                   f"{lr['cal']['brier']:.3f}, leader-wins accuracy {_pct(lr['cal']['acc'], 1)} (raw sim {lr['raw']['brier']:.3f}). "
+                   "The calibrator refits every night from these.")
+    else:
+        st.caption("No finished games graded yet. Every live reading is logged and graded when the game ends.")
+    if lr.get("misses"):
+        st.markdown("Confidently wrong (>80% for the side that lost):")
+        st.dataframe(pd.DataFrame(lr["misses"]), hide_index=True)
+    import pathlib
+    md = pathlib.Path(__file__).parent / "docs" / "NFL_ENGINE_INGAME.md"
+    if md.exists():
+        with st.expander("Historical in-game backtest (held-out seasons)"):
+            st.markdown(md.read_text(encoding="utf-8"))
     st.markdown("##### Live corrections applied to every simulation")
     adj = dict(livetune.LIVE_ADJ)
     if adj:

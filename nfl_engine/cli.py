@@ -22,8 +22,16 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("home")
     p.add_argument("away")
     p.add_argument("--sims", type=int, default=5000)
+    g = sub.add_parser("ingame", help="backtest the live win probability from mid-game states and fit its calibrator")
+    g.add_argument("--per-season", type=int, default=120)
+    g.add_argument("--sims", type=int, default=250)
+    g.add_argument("--workers", type=int, default=4)
+    g.add_argument("--refit", action="store_true", help="refit the calibrator from saved states only")
     a = ap.parse_args(argv)
-    if a.cmd == "train":
+    if a.cmd == "ingame":
+        from nfl_engine.ingame_cli import run
+        run(a)
+    elif a.cmd == "train":
         from nfl_engine.pipeline import train
         train(train_end=a.train_end, cal_years=a.cal_years, n_test=a.sims, search=not a.no_search,
               refresh=a.refresh, out_md=Path(a.report))
