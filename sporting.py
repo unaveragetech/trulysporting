@@ -1906,6 +1906,19 @@ class SportsDB:
                 pass
         return count
 
+    def has_summaries(self, event_ids: List[str]) -> set:
+        """Which of these events have a stored summary, without loading the rows."""
+        found: set = set()
+        ids = [str(e) for e in event_ids if e]
+        conn = self.get_connection()
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            found.update(r[0] for r in conn.execute(
+                f"SELECT event_id FROM game_summaries WHERE event_id IN ({','.join('?' * len(chunk))})",
+                chunk))
+        conn.close()
+        return found
+
     def get_game_summary(self, event_id: str) -> Optional[Dict]:
         """Return the stored game summary dict for event_id, or None if not found.
 
@@ -2708,7 +2721,7 @@ def clear_read_cache():
 
 for _name, _fn in list(vars(SportsDB).items()):
     if (not callable(_fn) or isinstance(_fn, (staticmethod, classmethod))
-            or _name.startswith('_') or _name in ('get_connection', 'init_db')):
+            or _name.startswith(('_', 'has_', 'is_')) or _name in ('get_connection', 'init_db')):
         continue
     setattr(SportsDB, _name,
             _cached_read(_fn) if _name.startswith('get_') else _invalidating(_fn))
@@ -3479,7 +3492,8 @@ def _auto_fresh(flag: str, ttl: int, label: str, fn, *args, **kwargs) -> bool:
 
 def _prefetch_summaries(db: Any, worker: Any, cat: str, spt: str, event_ids: List[str]) -> int:
     """Download missing game summaries (box score, PBP, injuries…) 4 at a time."""
-    missing = [e for e in event_ids if e and not db.get_game_summary(str(e))]
+    have = db.has_summaries(event_ids)
+    missing = [e for e in event_ids if e and str(e) not in have]
     if not missing:
         return 0
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -4172,26 +4186,6 @@ def render_game_card(game: Any, db: Any = None, worker: Any = None, category: st
         f'🌤 {game["weather"]}' if game.get('weather') else '') if x)
 
     card_html = f'''
-    <style>
-      .tsg {{ background:#fff;border:1px solid #e5e9f2;border-radius:16px;padding:14px 16px;
-             margin-bottom:12px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 4px 16px rgba(15,23,42,.06);
-             font-family:Inter,system-ui,sans-serif;color:#0f172a; }}
-      .tsg-top {{ display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px; }}
-      .tsg-pill {{ font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px; }}
-      .tsg-row {{ display:flex;align-items:center;gap:10px;padding:5px 0; }}
-      .tsg-name {{ flex:1;font-size:15px;min-width:0; }}
-      .tsg-rec {{ font-size:12px;color:#94a3b8;font-weight:500;margin-left:6px; }}
-      .tsg-score {{ font-size:24px;min-width:44px;text-align:right;font-variant-numeric:tabular-nums; }}
-      .tsg-line {{ overflow-x:auto;margin:8px 0 2px; }}
-      .tsg-line table {{ border-collapse:collapse;font-size:12px;color:#475569; }}
-      .tsg-line th, .tsg-line td {{ padding:2px 8px;text-align:center; }}
-      .tsg-line td:first-child, .tsg-line th:first-child {{ text-align:left;font-weight:600;color:#0f172a; }}
-      .tsg-chips {{ display:flex;flex-wrap:wrap;gap:6px;margin-top:10px; }}
-      .tsg-chip {{ font-size:12px;color:#475569;background:#f1f5f9;border-radius:999px;padding:4px 10px; }}
-      .tsg-meta {{ font-size:12px;color:#64748b;margin-top:10px; }}
-      .tsg-link {{ font-size:12px;font-weight:600;color:#2563eb;text-decoration:none;margin-right:12px; }}
-      .tsg-head {{ font-size:13px;color:#334155;font-style:italic;margin-top:8px; }}
-    </style>
     <div class="tsg">
       <div class="tsg-top">{pill}</div>
       {_team_row('away', away_score, (not home_win) and is_final)}
@@ -4222,6 +4216,11 @@ def render_game_card(game: Any, db: Any = None, worker: Any = None, category: st
 
     home_abbr_game = str(game.get('home_abbr') or game.get('home_team', 'HOME'))
     away_abbr_game = str(game.get('away_abbr') or game.get('away_team', 'AWAY'))
+
+    # Closed expanders still render their contents, and a day's slate would build
+    # every box score and play-by-play. Only build them for a card that's opened.
+    if not st.toggle('📊 Show game detail & play-by-play', key=f'gd_open_{event_id}'):
+        return
 
     # ── Summary (box score, injuries, odds…) loads automatically ──
     has_summary = bool(db.get_game_summary(event_id))
@@ -5040,7 +5039,10 @@ def inject_adsense() -> None:
 
             html = str(soup)
             new_html = html.replace("<head>", "<head>\n" + GA_AdSense)
-            index_path.write_text(new_html, encoding="utf-8")
+            # Atomic: a page load during a plain write would serve a truncated file.
+            tmp_index = index_path.with_suffix(".tmp")
+            tmp_index.write_text(new_html, encoding="utf-8")
+            os.replace(tmp_index, index_path)
             logging.info(f"AdSense injected into index.html for {ADSENSE_CLIENT}")
         except OSError as exc:
             logging.debug(f"AdSense index.html write failed (read-only fs?): {exc}")
@@ -5165,8 +5167,14 @@ def _get_shared_backend(app_ver: int, src_mtime: float = 0.0) -> Dict[str, Any]:
     return {'db': _db, 'worker': _worker}
 
 
+@st.cache_resource(show_spinner=False)
+def _inject_adsense_once() -> bool:
+    inject_adsense()
+    return True
+
+
 def main():
-    inject_adsense()   # no-op until ADSENSE_CLIENT / ADSENSE_SLOT are filled in
+    _inject_adsense_once()
     st.set_page_config(
         page_title="TrulySporting Analytics",
         layout="wide",
@@ -5270,7 +5278,8 @@ def main():
         st.session_state['g_league'] = _active_g[0]
     _engine = _ensure_engine(db, worker, st.session_state['g_league'], _APP_VER)
 
-    @st.fragment(run_every=5)
+    # Every run re-renders in the browser, so an idle page shouldn't poll quickly.
+    @st.fragment(run_every=300 if _engine.status.get('phase') == 'idle' else 30)
     def _sync_chip():
         _eng = _ensure_engine(db, worker, st.session_state.get('g_league', _active_g[0]), _APP_VER)
         _blk = espn_blocked_for()
@@ -5788,12 +5797,6 @@ def main():
                                     st.rerun()
 
                             if st.session_state[_tog_key]:
-                                # Box scores for this date's finished games, in parallel.
-                                if 'event_id' in _d_games.columns:
-                                    _fin_ids = [str(e) for e, stt in zip(_d_games['event_id'],
-                                                                        _d_games['status'])
-                                                if 'FINAL' in str(stt).upper()]
-                                    _prefetch_summaries(db, worker, cat, sport, _fin_ids)
                                 for _, _g in _d_games.iterrows():
                                     render_game_card(_g, db=db, worker=worker,
                                                      category=cat, sport=sport)
@@ -6214,7 +6217,7 @@ def main():
                                                        _pt_sel_team_id, _pt_season)
                 _pt_done_ids = ([] if _pt_sched.empty else
                                 [e for e in _pt_sched.loc[_pt_sched['completed'], 'event_id'] if e])
-                _pt_have = sum(1 for e in _pt_done_ids if db.get_game_summary(e))
+                _pt_have = len(db.has_summaries(_pt_done_ids))
                 st.caption(
                     f"📦 {_pt_have} of {len(_pt_done_ids)} completed {_pt_season_lbl} games "
                     f"loaded · {len(_pt_roster_df)} players · updates automatically")

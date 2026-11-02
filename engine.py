@@ -154,8 +154,8 @@ class LeagueSync:
         if games.empty:
             return False  # nothing stored → never mark the season complete
         final = games[games['status'].astype(str).str.upper().str.contains('FINAL')]
-        missing = [str(e) for e in final['event_id']
-                   if e and not self.db.get_game_summary(str(e))]
+        have = self.db.has_summaries(list(final['event_id']))
+        missing = [str(e) for e in final['event_id'] if e and str(e) not in have]
         self._set(phase='box scores', season=yr, done=0, total=len(missing))
         if missing:
             done = 0
@@ -166,8 +166,7 @@ class LeagueSync:
                     if self._stop.is_set():
                         return False
             self.db.repopulate_player_game_stats()
-        still = [e for e in missing if not self.db.get_game_summary(e)]
-        return not still
+        return len(self.db.has_summaries(missing)) == len(missing)
 
     def _fetch_summary(self, event_id: str) -> None:
         try:
