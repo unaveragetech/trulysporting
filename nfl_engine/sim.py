@@ -283,6 +283,8 @@ class Engine:
             # ---- fourth down
             if down == 4:
                 act = self._fourth(o, yl, ytg, sd, gsr)
+                if act in ("fg", "punt") and self.trace is not None:
+                    self.trace.append((down, ytg, yl, 0, act, p))
                 if act == "fg":
                     return self._field_goal(p, o, yl)
                 if act == "punt":
@@ -358,6 +360,8 @@ class Engine:
                     if u2 < p_int:
                         if hk:
                             hk.interception(p, tgt, cov)
+                        if self.trace is not None:
+                            self.trace.append((down, ytg, yl, 0, "int", p))
                         return self._interception(p, yl, mode, o)
                     if u2 < p_int + p_comp:
                         pool = L.comp_pool[(z, b)]
@@ -382,7 +386,7 @@ class Engine:
 
             self._burn(mode, cat, o)
             if self.trace is not None:
-                self.trace.append((down, ytg, yl, y, kind))
+                self.trace.append((down, ytg, yl, y, kind, p))
             if kind in ("comp",):
                 st["pass_yds"][p] += y
             elif kind in ("run", "scr"):

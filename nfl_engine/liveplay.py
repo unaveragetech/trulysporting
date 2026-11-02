@@ -160,7 +160,8 @@ class PlayPredictor:
             self._np[k] = np.array(src[key] if kind != "sack" else self.L.sack_pool, float)
         return self._np[k]
 
-    def predict(self, side: int, down: int, ytg: int, yl: int, sd: int, gsr: int, period: int, resp: int = 0) -> dict:
+    def predict(self, side: int, down: int, ytg: int, yl: int, sd: int, gsr: int, period: int, resp: int = 0,
+                ig: float = 0.0) -> dict:
         L, eng = self.L, self.eng
         o: SideParams = self.spec.sides[side]
         qtr = min(period, 4)
@@ -169,6 +170,10 @@ class PlayPredictor:
 
         mode = clock_mode(sd, qtr, hsr)
         p_pass = eng._pass_prob(o, down, ytg, yl, sd, qtr, hsr, gsr, mode, resp)
+        if ig and mode == 0:  # what this offence has done so far today versus what the engine expected
+            from nfl_engine.nextplay import IG_W
+
+            p_pass = min(0.985, max(0.015, 1 / (1 + math.exp(-(math.log(p_pass / (1 - p_pass)) + IG_W * ig)))))
         z, b = zone(yl), ytg_bucket(ytg)
         rt = L.rates[(z, b)]
         ps, pc_ = max(0.0, rt["sack"] + o.d_sack), max(0.0, rt["scr"] + o.d_scr)
@@ -299,6 +304,7 @@ def process_event(event: str, predictor: PlayPredictor, spec: GameSpec, home: st
         log = load_log(event)
         log.update({"home": teams["home"], "away": teams["away"], "game_id": getattr(spec, "game_id", None)})
         changed = False
+        ig_acc: dict = {}  # offence -> [sum of (actual pass - predicted pass), plays] earlier in THIS game
         for i, pl in enumerate(plays):
             if pl["id"] in log["plays"] and log["plays"][pl["id"]].get("done"):
                 continue
@@ -310,10 +316,15 @@ def process_event(event: str, predictor: PlayPredictor, spec: GameSpec, home: st
                 side = 0 if pl["off"] == teams["home"] else 1
                 before = (pl["home_before"], pl["away_before"])
                 sd = (before[0] - before[1]) * (1 if side == 0 else -1)
+                acc = ig_acc.get(pl["off"], [0.0, 0])
                 pr = predictor.predict(side, pl["down"], max(1, pl["ytg"]), max(1, int(pl["yl"])), sd, pl["gsr"],
-                                       pl["period"], resp_code(plays[i - 1] if i else None, pl))
+                                       pl["period"], resp_code(plays[i - 1] if i else None, pl), acc[0] / (acc[1] + 20.0))
                 rec["pred"] = public(pr)
                 rec["score"] = score_play(pr, pl)
+            if scrim and pl["cat"] in ("run", "comp", "inc", "sack", "int"):
+                a = ig_acc.setdefault(pl["off"], [0.0, 0])
+                a[0] += float(pl["cat"] != "run") - rec["pred"]["p_pass"]
+                a[1] += 1
             rec["done"] = True
             log["plays"][pl["id"]] = rec
             changed = True
@@ -346,9 +357,28 @@ def summarize_log(log: dict) -> dict:
         "to_pred": float(np.sum([r["pred"]["p_turnover"] for r in rows])),
         "to_act": int(sum(r["turnover"] for r in rows)),
         "mean_surprise": float(np.mean([r["score"]["surprise"] for r in rows])),
+        "call_acc": float(np.mean([(r["pred"]["p_pass"] > 0.5) == (r["cat"] in ("comp", "inc", "int", "sack")) for r in rows])),
+        "call_ll": float(np.mean([-math.log(max(1e-4, r["pred"]["p_pass"] if r["cat"] in ("comp", "inc", "int", "sack")
+                                                else 1 - r["pred"]["p_pass"])) for r in rows])),
         "pit_lo10": float(np.mean([p < 0.1 for p in pct])) if pct else None,
         "pit_hi10": float(np.mean([p > 0.9 for p in pct])) if pct else None,
     }
+
+
+def state_from_plays(plays: list[dict]) -> dict | None:
+    """Current situation (regulation only) from the parsed plays; None when there is nothing to project."""
+    last = next((p for p in reversed(plays) if p["cat"] != "other" or p["down"]), None)
+    if last is None or not plays:
+        return None
+    end = last["end"]
+    if last["period"] >= 5 or not end or end.get("yardsToEndzone") is None or last.get("end_side") is None:
+        return None
+    first = next((p for p in plays if p["cat"] in ("run", "comp", "inc", "sack", "int", "punt", "fg")), None)
+    return {"down": int(end.get("down") or 1), "ytg": int(end.get("distance") or 10), "yl": int(end["yardsToEndzone"]),
+            "poss": 0 if last["end_side"] == "home" else 1, "hs": last["home_score"], "as": last["away_score"],
+            "gsr": float(last["gsr"]), "period": last["period"],
+            "first_recv": None if first is None else (0 if first["off_side"] == "home" else 1),
+            "resp": resp_code(last, {"off": last.get("off")}) if last.get("off_side") == last.get("end_side") else 0}
 
 
 def live_win_prob(L, spec: GameSpec, plays: list[dict], sims: int = 300, calibrated: bool = True,
