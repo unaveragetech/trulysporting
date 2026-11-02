@@ -122,15 +122,15 @@ def _free_html() -> str:
 def _tiers_html() -> str:
     btns = "".join(
         f'<a href="{_cash(a)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;flex:1;min-width:120px">'
-        f'<div style="background:#fff;border:2px solid #00d632;border-radius:14px;padding:14px 8px;text-align:center">'
-        f'<div style="font-size:1.5rem;font-weight:900;color:#00a825">${a}</div>'
+        f'<div style="background:#fff;border:2px solid #16a34a;border-radius:14px;padding:14px 8px;text-align:center">'
+        f'<div style="font-size:1.5rem;font-weight:900;color:#15803d">${a}</div>'
         f'<div style="font-size:11px;color:#64748b;margin-top:2px">{label}</div></div></a>' for a, label in TIERS)
     extra = "".join(
         f'<a href="{x["url"]}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;color:#0c4a6e;'
         f'font-weight:700;font-size:13px;margin:0 10px">{x["label"]} →</a>' for x in EXTRA_LINKS)
     return ('<div style="max-width:780px;margin:30px auto 0;padding:0 8px">'
-            '<div style="background:linear-gradient(135deg,#00d632,#00a825);border-radius:18px;padding:24px 22px;'
-            'box-shadow:0 6px 24px rgba(0,214,50,.3)">'
+            '<div style="background:linear-gradient(135deg,#16a34a,#15803d);border-radius:18px;padding:24px 22px;'
+            'box-shadow:0 6px 24px rgba(22,163,74,.35)">'
             '<div style="text-align:center;color:#fff;font-size:1.2rem;font-weight:900;margin-bottom:4px">Chip in with one tap</div>'
             f'<div style="text-align:center;color:rgba(255,255,255,.9);font-size:.9rem;margin-bottom:14px">'
             f'We are {_next_unfunded()}. Any amount helps; Cash App opens with the amount filled in.</div>'
@@ -215,7 +215,7 @@ def render_support_page() -> None:
       <h2 style="font-size:1.1rem;font-weight:800;color:#fff;margin:6px 0">Prefer to code? Contribute.</h2>
       <p style="color:rgba(255,255,255,.75);font-size:.92rem;line-height:1.7;max-width:540px;margin:0 auto 14px">
         TrulySporting is fully open source. Every roadmap item is a viable pull request, and bug reports and ideas are welcome.</p>
-      <a href="{REPO_URL}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#00d632;color:#fff;
+      <a href="{REPO_URL}" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#16a34a;color:#fff;
          font-weight:800;font-size:14px;border-radius:50px;padding:10px 32px;text-decoration:none">⭐ View on GitHub →</a></div>
     <p style="text-align:center;font-size:11px;color:#9aa;margin:18px 0 0;line-height:1.8">
       100% of donations go directly to the developer. No obligation. TrulySporting stays free and open source.</p>""")
@@ -246,7 +246,7 @@ def support_nudge(trigger: str = "") -> None:
             '<div style="font-size:13px;color:#14532d;line-height:1.5;flex:1;min-width:220px">'
             '💚 <strong>Enjoying TrulySporting?</strong> It is free and built by one person. If it has been useful, '
             'a small tip keeps the live data and new features coming. This note only appears once per visit.</div>'
-            f'<a href="{_cash(5)}" target="_blank" rel="noopener noreferrer" style="background:#00a825;color:#fff;font-weight:800;'
+            f'<a href="{_cash(5)}" target="_blank" rel="noopener noreferrer" style="background:#15803d;color:#fff;font-weight:800;'
             'font-size:13px;border-radius:50px;padding:8px 18px;text-decoration:none;white-space:nowrap">Tip $5</a>'
             f'<a href="{_cash()}" target="_blank" rel="noopener noreferrer" style="color:#166534;font-weight:700;font-size:12px;'
             'text-decoration:none;white-space:nowrap">other amount</a></div>')

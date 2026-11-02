@@ -19,6 +19,7 @@ import plotly.express as px
 from odds_page import render_odds_page
 from matchups import render_matchups_page
 import ui
+import theme
 from sporting_shared import viewer_today, viewer_tz
 from live import render_live_page
 from player_insights import render_player_insights
@@ -4133,7 +4134,7 @@ def render_game_card(game: Any, db: Any = None, worker: Any = None, category: st
                                   f'background:{color};display:inline-block"></span>')
         show_score = is_final or is_live
         weight = '800' if (won and is_final) else '600'
-        dim = '#94a3b8' if (is_final and not won) else '#0f172a'
+        dim = 'var(--ts-muted)' if (is_final and not won) else 'var(--ts-ink)'
         return (f'<div class="tsg-row">{logo_html}'
                 f'<div class="tsg-name" style="font-weight:{weight};color:{dim}">{name}'
                 f'<span class="tsg-rec">{rec}</span></div>'
@@ -4141,15 +4142,15 @@ def render_game_card(game: Any, db: Any = None, worker: Any = None, category: st
                 f'{score if show_score else ""}</div></div>')
 
     if is_final:
-        pill = '<span class="tsg-pill" style="background:#e2e8f0;color:#334155">Final</span>'
+        pill = '<span class="tsg-pill final">Final</span>'
     elif is_live:
-        pill = (f'<span class="tsg-pill" style="background:#fee2e2;color:#b91c1c">● Live '
+        pill = (f'<span class="tsg-pill live">Live '
                 f'{game.get("clock", "")}'
                 + ('' if category == 'soccer' else
                    f' · {"P" if category == "hockey" else "Q"}{game.get("period", "")}')
                 + '</span>')
     else:
-        pill = (f'<span class="tsg-pill" style="background:#e8efff;color:#1e40af">'
+        pill = (f'<span class="tsg-pill pre">'
                 f'{game.get("status_detail", "Scheduled")}</span>')
     if game.get('note'):
         pill += f'<span class="tsg-pill" style="background:#ede9fe;color:#6d28d9">{game["note"]}</span>'
@@ -4185,8 +4186,13 @@ def render_game_card(game: Any, db: Any = None, worker: Any = None, category: st
         f'📺 {game["broadcast"]}' if game.get('broadcast') else '',
         f'🌤 {game["weather"]}' if game.get('weather') else '') if x)
 
+    def _hex(c, dflt):
+        c = str(c or '').strip().lstrip('#')
+        return '#' + c if re.fullmatch(r'[0-9a-fA-F]{6}', c) else dflt
+    stripe = f'linear-gradient(180deg,{_hex(away_color, "#64748b")} 0%,{_hex(away_color, "#64748b")} 50%,'              f'{_hex(home_color, "#94a3b8")} 50%,{_hex(home_color, "#94a3b8")} 100%)'
     card_html = f'''
     <div class="tsg">
+      <div class="tsg-stripe" style="background:{stripe}"></div>
       <div class="tsg-top">{pill}</div>
       {_team_row('away', away_score, (not home_win) and is_final)}
       {_team_row('home', home_score, home_win)}
@@ -5098,7 +5104,7 @@ _BOTTOM_NAV_CSS = """
 <style>
 .st-key-bottom_nav {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 999990;
-  background: #ffffff; border-top: 1px solid #e5e7eb;
+  background: var(--ts-header-bg); border-top: 1px solid var(--ts-line);
   box-shadow: 0 -4px 14px rgba(0,0,0,.06);
   padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
 }
@@ -5183,6 +5189,7 @@ def main():
     )
 
     st.html(ui.CSS)
+    st.html(theme.css(theme.current_mode()))
     if 'streamlit.app' in (st.context.headers.get('host') or ''):
         st.html(ui.CLOUD_CSS)
 
@@ -5202,8 +5209,8 @@ def main():
     position: fixed;
     bottom: 0; left: 0; right: 0;
     z-index: 99999;
-    background: #fff;
-    border-top: 1px solid #d0d5e0;
+    background: var(--ts-card);
+    border-top: 1px solid var(--ts-line);
     padding: 4px 12px;
     display: flex;
     align-items: center;
@@ -5405,7 +5412,7 @@ def main():
         st.divider()
         st.html(
             '<a href="https://cash.app/$slightlysigh" target="_blank" rel="noopener noreferrer" '
-            'style="display:block;background:linear-gradient(135deg,#00d632,#00a825);'
+            'style="display:block;background:linear-gradient(135deg,#16a34a,#15803d);'
             'border-radius:10px;padding:10px 14px;text-align:center;color:#fff;'
             'font-weight:700;font-size:13px;text-decoration:none;margin-bottom:8px">'
             '💸 Support the Project</a>'
