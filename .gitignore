@@ -24,3 +24,8 @@ Thumbs.db
 
 # Custom views output (runtime generated)
 custom_views/public/
+
+# NFL engine caches (the trained model.pkl is committed)
+data/nfl_engine/*
+!data/nfl_engine/model.pkl
+!data/nfl_engine/report.json
