@@ -84,16 +84,44 @@ function project(g){
   return {f,ph,pd,hf:t/2+m/2,af:t/2-m/2,model:!!pre};
 }
 function allLeagues(){return S.args.leagues||[]}
-async function pollBoards(force){
-  const now=Date.now();
-  await Promise.all(allLeagues().map(async L=>{
-    const hasLive=Object.values(S.games).some(g=>g.ep===L.ep&&g.state==='in');
-    if(!force&&now-(S.leagueLast[L.ep]||0)<(hasLive?10000:60000))return;
-    S.leagueLast[L.ep]=now;
-    try{const d=await j(B+L.ep+'/scoreboard');(d.events||[]).forEach(ev=>{const g=parseEvent(L.ep,ev);if(!g.id)return;const old=S.games[g.id];S.clocks[g.id]=nextClock(g);if(old)checkAlerts(old,g);S.games[g.id]=g})}catch(e){}
-  }));
-  draw();
+/* ESPN's default scoreboard hides most college games and rolls to the next day before late games end, so ask
+   explicitly: college groups, today and (for pro leagues, or early morning) yesterday in US Eastern time. */
+const COLLEGE={'football/college-football':['80','81'],'basketball/mens-college-basketball':['50'],'basketball/womens-college-basketball':['50']};
+function etDates(){
+  const f=d=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(d).replace(/-/g,'');
+  const now=new Date(),hour=+new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'2-digit',hour12:false}).format(now)%24;
+  return {today:f(now),yday:f(new Date(now-864e5)),early:hour<7};
 }
+function boardUrls(ep){
+  const d=etDates(),col=COLLEGE[ep],urls=[];
+  (col||[null]).forEach(g=>{
+    const q=x=>B+ep+'/scoreboard?limit=300'+(g?'&groups='+g:'')+(x?'&dates='+x:'');
+    if(!col)urls.push(q(''));
+    urls.push(q(d.today));
+    if(!col||d.early)urls.push(q(d.yday));
+  });
+  return urls;
+}
+async function jt(u,ms){const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);try{const r=await fetch(u,{signal:c.signal});if(!r.ok)throw new Error(r.status);return await r.json()}finally{clearTimeout(t)}}
+let drawQueued=false;
+function scheduleDraw(){if(drawQueued)return;drawQueued=true;requestAnimationFrame(()=>{drawQueued=false;draw()})}
+async function pollLeague(L,force){
+  const now=Date.now();
+  const hasLive=Object.values(S.games).some(g=>g.ep===L.ep&&g.state==='in');
+  if(!force&&now-(S.leagueLast[L.ep]||0)<(hasLive?10000:60000))return;
+  S.leagueLast[L.ep]=now;
+  const urls=boardUrls(L.ep),seen=new Set();let ok=0;
+  await Promise.all(urls.map(async u=>{
+    try{
+      const d=await jt(u,10000);ok++;
+      (d.events||[]).forEach(ev=>{const g=parseEvent(L.ep,ev);if(!g.id)return;seen.add(g.id);const old=S.games[g.id];S.clocks[g.id]=nextClock(g);if(old)checkAlerts(old,g);S.games[g.id]=g});
+    }catch(e){}
+  }));
+  // A game that left every scoreboard is gone; never leave a stale "live" card behind. Only when every request worked.
+  if(ok===urls.length)Object.keys(S.games).forEach(id=>{const g=S.games[id];if(g.ep===L.ep&&!seen.has(id))delete S.games[id]});
+  scheduleDraw();  // draw as each league arrives, not after the slowest one
+}
+async function pollBoards(force){await Promise.all(allLeagues().map(L=>pollLeague(L,force)));scheduleDraw()}
 function nextClock(g){const k=S.clocks[g.id];const moved=k&&k.raw!==g.clock;return {raw:g.clock,val:+g.clock,at:Date.now(),run:g.state==='in'&&!!moved}}
 
 /* ── Watching & alerts ── */
