@@ -20,7 +20,7 @@ from odds_page import render_odds_page
 from matchups import render_matchups_page
 import ui
 import theme
-from sporting_shared import viewer_today, viewer_tz
+from sporting_shared import LIVE_STATUS_RE, et_dates, status_is_live, viewer_today, viewer_tz
 from live import render_live_page
 from player_insights import render_player_insights
 import matchups as _mu
@@ -3928,7 +3928,7 @@ def render_game_card(game: Any, db: Any = None, worker: Any = None, category: st
     """
     status = str(game.get('status', ''))
     is_final = 'FINAL' in status.upper()
-    is_live = any(x in status.upper() for x in ('PROGRESS', 'HALF', 'LIVE'))
+    is_live = status_is_live(status)
 
     home_score = int(game['home_score']) if game.get('home_score') else 0
     away_score = int(game['away_score']) if game.get('away_score') else 0
@@ -4215,7 +4215,7 @@ def render_game_card(game: Any, db: Any = None, worker: Any = None, category: st
 
     event_id = str(game.get('event_id', ''))
     is_final  = 'FINAL' in str(game.get('status', '')).upper()
-    is_live   = any(x in str(game.get('status', '')).upper() for x in ('PROGRESS', 'HALF', 'LIVE'))
+    is_live   = status_is_live(game.get('status', ''))
 
     if not event_id or not (is_final or is_live):
         return
@@ -5062,14 +5062,14 @@ _ADMIN_PW_HASH  = "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d154
 _ADMIN_PIN_HASH = "ff7faf9dc56f2a51cc8c1e19c05e5f6609f01b89cb4e4e70e5a688d3a13d7cf9"
 
 
-_PUBLIC_PAGES = ["🏅 Scores", "🔴 Live", "⚔️ Matchups", "🎯 Odds", "📊 Backtest", "🏈 NFL Engine", "👤 Players", "🏟 Teams",
+_PUBLIC_PAGES = ["🏅 Scores", "🔴 Live", "⚔️ Matchups", "🎯 Odds", "🎰 Parlays", "📊 Backtest", "🏈 NFL Engine", "👤 Players", "🏟 Teams",
                  "🔔 Watch", "📈 Team Trends", "🏆 Rankings", "📰 News", "📋 Custom Views"]
 _ADMIN_PAGES = ["🌐 Network", "🔬 Schema Explorer", "🔍 Raw Inspector", "🛠 Admin Panel"]
 _PAGE_IDS = {
     "🏅 Scores": 1, "📈 Team Trends": 2, "👤 Players": 3, "🏟 Teams": 4,
     "📰 News": 5, "🏆 Rankings": 6, "🌐 Network": 7, "🔬 Schema Explorer": 8,
     "🔍 Raw Inspector": 9, "📋 Custom Views": 10, "🛠 Admin Panel": 11,
-    "💚 Support": 12, "🎯 Odds": 13, "⚔️ Matchups": 14, "⚙️ Settings": 15, "🔴 Live": 16, "📊 Backtest": 17, "🔔 Watch": 18, "🏈 NFL Engine": 19,
+    "💚 Support": 12, "🎯 Odds": 13, "⚔️ Matchups": 14, "⚙️ Settings": 15, "🔴 Live": 16, "📊 Backtest": 17, "🔔 Watch": 18, "🏈 NFL Engine": 19, "🎰 Parlays": 20,
 }
 # Each page's own league picker; the global header picker drives them all.
 _PAGE_LEAGUE_KEYS = ['sb_ep', 'trend_ep', 'pt_ep', 'teams_ep', 'news_ep', 'r5_league',
@@ -5147,6 +5147,33 @@ def _ensure_engine(db: Any, worker: Any, ep: str, app_ver: int) -> Any:
     return reg[ep]
 
 
+def _render_live_everywhere() -> None:
+    """Every game being played right now on any ESPN league we scan, whatever league is selected below."""
+    from live import ALL_ESPN_LEAGUES, fetch_all_live
+
+    @st.fragment(run_every=30)
+    def _strip():
+        try:
+            df = fetch_all_live()
+        except Exception:
+            df = pd.DataFrame()
+        if df.empty:
+            st.caption(f'🔴 Live now: nothing in progress across {len(ALL_ESPN_LEAGUES)} leagues. Checked every 30 seconds.')
+            return
+        cards = ''
+        for g in df.sort_values(['ep', 'start']).itertuples():
+            clock = f'{g.clock} · P{g.period}' if g.clock and g.period else g.detail
+            cards += (f'<div class="tsg" style="margin:0;padding:10px 12px 10px 18px"><div class="tsg-stripe" '
+                      f'style="background:var(--ts-live)"></div><div class="tsg-top"><span class="tsg-pill live">'
+                      f'{_league_label(g.ep)}</span><span class="tsg-rec">{clock}</span></div>'
+                      f'<div class="tsg-row"><div class="tsg-name">{g.away}</div><div class="tsg-score" style="font-size:22px !important">{g.away_score}</div></div>'
+                      f'<div class="tsg-row"><div class="tsg-name">{g.home}</div><div class="tsg-score" style="font-size:22px !important">{g.home_score}</div></div></div>')
+        st.markdown(f'##### 🔴 Live now: {len(df)} game{"s" if len(df) != 1 else ""} across {df["ep"].nunique()} league'
+                    f'{"s" if df["ep"].nunique() != 1 else ""}')
+        st.html(f'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px">{cards}</div>')
+    _strip()
+
+
 def _league_label(ep: str) -> str:
     names = {
         'football/nfl': '🏈 NFL', 'football/college-football': '🏈 College Football',
@@ -5161,6 +5188,9 @@ def _league_label(ep: str) -> str:
         'soccer/ger.1': '⚽ Bundesliga', 'soccer/ita.1': '⚽ Serie A', 'soccer/fra.1': '⚽ Ligue 1',
         'soccer/uefa.champions': '⚽ Champions League', 'soccer/uefa.europa': '⚽ Europa League',
         'soccer/mex.1': '⚽ Liga MX', 'soccer/usa.nwsl': '⚽ NWSL', 'soccer/eng.2': '⚽ Championship',
+        'hockey/womens-college-hockey': "🏒 Women's College Hockey", 'soccer/concacaf.champions': '⚽ CONCACAF Champions',
+        'soccer/conmebol.libertadores': '⚽ Libertadores', 'soccer/ned.1': '⚽ Eredivisie', 'soccer/por.1': '⚽ Primeira Liga',
+        'soccer/bra.1': '⚽ Brasileirão', 'soccer/arg.1': '⚽ Argentine Primera',
     }
     return names.get(ep, ep.split('/')[-1].replace('-', ' ').title())
 
@@ -5635,6 +5665,7 @@ def main():
                            "Full-season game browser · Live scores · Box scores · PBP",
                            _ep1)
         _render_how_it_works('scoreboard')
+        _render_live_everywhere()
 
         if not active_eps:
             st.info("Select leagues in the sidebar to get started.")
@@ -5680,8 +5711,7 @@ def main():
             _auto_fresh(f'sb_live_{cat}_{sport}', 120, "Updating scores…",
                         lambda: (worker.fetch_and_process(cat, sport, 'scoreboard',
                                                           force_refresh=True),
-                                 worker.fetch_date_scoreboard(
-                                     cat, sport, _dt1.datetime.now().strftime('%Y%m%d'))))
+                                 *[worker.fetch_date_scoreboard(cat, sport, _d) for _d in et_dates()]))
 
             # ── Query DB for all season games ────────────────────
             df_games = db.get_season_games_df(cat, sport, sb_season)
@@ -5696,13 +5726,13 @@ def main():
                 # ── Apply status filter ────────────────────────
                 if _sb_status_filter == "🔴 Live":
                     df_games = df_games[df_games['status'].str.contains(
-                        'PROGRESS|HALF|LIVE', na=False, case=False)]
+                        LIVE_STATUS_RE, na=False, case=False)]
                 elif _sb_status_filter == "✅ Final":
                     df_games = df_games[df_games['status'].str.contains(
                         'FINAL', na=False, case=False)]
                 elif _sb_status_filter == "📅 Scheduled":
-                    df_games = df_games[~df_games['status'].str.contains(
-                        'FINAL|PROGRESS|HALF|LIVE', na=False, case=False)]
+                    df_games = df_games[~(df_games['status'].str.contains('FINAL', na=False, case=False)
+                                          | df_games['status'].str.contains(LIVE_STATUS_RE, na=False, case=False))]
 
                 # ── Optional team search ───────────────────────
                 _sb_search = st.text_input(
@@ -5721,7 +5751,7 @@ def main():
                 # ── Summary metrics ────────────────────────────
                 _sb_all   = len(df_games)
                 _sb_final = df_games['status'].str.contains('FINAL', na=False).sum()
-                _sb_live  = df_games['status'].str.contains('PROGRESS|HALF|LIVE',
+                _sb_live  = df_games['status'].str.contains(LIVE_STATUS_RE,
                                                              na=False, case=False).sum()
                 _sb_sched = _sb_all - _sb_final - _sb_live
 
@@ -5751,7 +5781,7 @@ def main():
                 else:
                     # ── Render live games at the top (no grouping) ─
                     _df_live = df_games[df_games['status'].str.contains(
-                        'PROGRESS|HALF|LIVE', na=False, case=False)]
+                        LIVE_STATUS_RE, na=False, case=False)]
                     if not _df_live.empty:
                         st.markdown("#### 🔴 In Progress")
                         for _, _g in _df_live.iterrows():
@@ -5760,7 +5790,7 @@ def main():
 
                     # ── Group remaining games by date ──────────────
                     _df_rest = df_games[~df_games['status'].str.contains(
-                        'PROGRESS|HALF|LIVE', na=False, case=False)].copy()
+                        LIVE_STATUS_RE, na=False, case=False)].copy()
 
                     if not _df_rest.empty:
                         # Ensure event_date is string for grouping
@@ -9665,6 +9695,10 @@ def main():
                    'for its live game centre. Your list is saved in this browser.')
         render_tracker(db, worker, _active_g, ESPNWorker._espn_season_year, _league_label,
                        tab='watch')
+
+    if _page == 20:
+        from parlay_page import render_parlay_page
+        render_parlay_page(db, worker, ESPNWorker._espn_season_year, _league_label)
 
     if _page == 19:
         from nfl_engine_page import render_nfl_engine_page

@@ -282,7 +282,65 @@ ALL_ESPN_LEAGUES = [
     'hockey/mens-college-hockey', 'soccer/usa.1', 'soccer/eng.1', 'soccer/esp.1',
     'soccer/ger.1', 'soccer/ita.1', 'soccer/fra.1', 'soccer/uefa.champions',
     'soccer/uefa.europa', 'soccer/mex.1', 'soccer/usa.nwsl', 'soccer/eng.2',
+    'hockey/womens-college-hockey', 'soccer/concacaf.champions', 'soccer/conmebol.libertadores',
+    'soccer/ned.1', 'soccer/por.1', 'soccer/bra.1', 'soccer/arg.1',
 ]
+
+
+def event_row(ep: str, ev: Dict) -> Dict:
+    """One flat row per ESPN event (any state), with the odds ESPN embeds."""
+    comp = (ev.get('competitions') or [{}])[0]
+    status = comp.get('status') or ev.get('status') or {}
+    typ = status.get('type', {})
+    t = {c.get('homeAway'): c for c in comp.get('competitors', [])}
+    h, a = t.get('home', {}), t.get('away', {})
+    ht, at = h.get('team', {}), a.get('team', {})
+    odds = (comp.get('odds') or [{}])[0] or {}
+    tv = ', '.join(n for b in comp.get('broadcasts', []) for n in b.get('names', []))
+
+    def num(v):
+        try:
+            return float(str(v).replace('+', ''))
+        except (TypeError, ValueError):
+            return None
+
+    ml = odds.get('moneyline') or {}
+    ps = odds.get('pointSpread') or {}
+
+    def close(side, d, k='odds'):
+        blk = d.get(side) or {}
+        return num((blk.get('close') or blk.get('open') or {}).get(k))
+
+    return {
+        'ep': ep, 'id': str(ev.get('id')), 'start': ev.get('date', ''), 'state': typ.get('state', ''),
+        'status_name': typ.get('name', ''), 'detail': typ.get('shortDetail', ''),
+        'period': status.get('period', 0), 'clock': status.get('displayClock', ''),
+        'home': ht.get('displayName', ''), 'away': at.get('displayName', ''),
+        'home_abbr': ht.get('abbreviation', ''), 'away_abbr': at.get('abbreviation', ''),
+        'home_id': str(ht.get('id', '')), 'away_id': str(at.get('id', '')),
+        'home_logo': ht.get('logo', ''), 'away_logo': at.get('logo', ''),
+        'home_loc': ht.get('location', ''), 'away_loc': at.get('location', ''),
+        'home_score': int(float(h.get('score') or 0)), 'away_score': int(float(a.get('score') or 0)),
+        'tv': tv, 'book': (odds.get('provider') or {}).get('name', ''),
+        'home_ml': close('home', ml), 'away_ml': close('away', ml),
+        'spread': close('home', ps, 'line') if ps else num(odds.get('spread')), 'total': num(odds.get('overUnder')),
+    }
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def fetch_all_games(eps: Tuple[str, ...] = tuple(ALL_ESPN_LEAGUES)) -> pd.DataFrame:
+    """Every game on every listed league's board (live, upcoming, final), from requests that do not miss
+    college games or games that started before midnight.  Cached 20 seconds."""
+    from sporting_shared import fetch_events_many
+    rows = []
+    for ep, events in fetch_events_many(list(eps)).items():
+        rows += [event_row(ep, ev) for ev in events]
+    return pd.DataFrame(rows)
+
+
+def fetch_all_live() -> pd.DataFrame:
+    df = fetch_all_games()
+    return df[df['state'] == 'in'].reset_index(drop=True) if not df.empty else df
 
 
 @st.cache_data(ttl=60, show_spinner=False)
