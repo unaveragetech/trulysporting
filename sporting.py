@@ -5220,6 +5220,7 @@ def main():
 
     st.html(ui.CSS)
     st.html(theme.css(theme.current_mode()))
+    theme.ensure_default_light()
     if 'streamlit.app' in (st.context.headers.get('host') or ''):
         st.html(ui.CLOUD_CSS)
 
@@ -5442,7 +5443,7 @@ def main():
         st.divider()
         st.html(
             '<a href="https://cash.app/$slightlysigh" target="_blank" rel="noopener noreferrer" '
-            'style="display:block;background:linear-gradient(135deg,#16a34a,#15803d);'
+            'style="display:block;background:linear-gradient(135deg,#15803d,#166534);'
             'border-radius:10px;padding:10px 14px;text-align:center;color:#fff;'
             'font-weight:700;font-size:13px;text-decoration:none;margin-bottom:8px">'
             '💸 Support the Project</a>'

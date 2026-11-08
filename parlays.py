@@ -127,6 +127,8 @@ class Leg:
     meta: Dict[str, Any] = field(default_factory=dict)  # what is needed to grade the leg from a final box score
     edge: Optional[float] = None                        # our chance minus the market's, when a market exists
     bettable: bool = True                               # false once the game has started or no market can take it
+    quotes: List[Dict[str, Any]] = field(default_factory=list)  # every price we found for this exact bet (see parlay_pricing)
+    info: Dict[str, Any] = field(default_factory=dict)          # game, team, injury, model and player details shown to the user
 
 
 @dataclass
@@ -362,7 +364,11 @@ def player_legs(db: Any, g: Dict, team_abbr: str, team_id: str, opp_factor: floa
                          meta={'kind': 'player', 'player': player, 'cat': cat, 'stat': stat, 'thr': float(thr), 'team_abbr': team_abbr,
                                'home': g.get('home', ''), 'away': g.get('away', ''), 'home_abbr': g['home_abbr'],
                                'away_abbr': g['away_abbr']},
-                         bettable=(g['state'] == 'pre')))
+                         bettable=(g['state'] == 'pre'),
+                         info={'player': player, 'team': team_abbr, 'stat': f'{stat} ({cat})', 'threshold': float(thr),
+                               'games_used': n, 'team_games': team_games, 'recent_values': [float(v) for v in vals],
+                               'average': mu, 'std_dev': sd, 'hits': hits, 'opponent_factor': f, 'expected': mean,
+                               'availability_allowance': 1 - PLAYER_AVAIL, 'listed_questionable': player in quest}))
     cands.sort(key=lambda l: -l.p)
     return cands[:max_per_team]
 
@@ -398,19 +404,47 @@ def eligible_leagues(board: pd.DataFrame, hours: int, leagues: List[str], now: O
 def leg_to_dict(l: Leg) -> Dict:
     return {'key': l.key, 'game_id': l.game_id, 'ep': l.ep, 'league': l.league, 'matchup': l.matchup, 'start': l.start,
             'kind': l.kind, 'pick': l.pick, 'p': l.p, 'price': l.price, 'meta': l.meta, 'edge': l.edge,
-            'sources': [vars(s) for s in l.sources], 'notes': l.notes}
+            'sources': [vars(s) for s in l.sources], 'notes': l.notes, 'quotes': l.quotes, 'info': l.info}
 
 
 def leg_from_dict(d: Dict) -> Leg:
     return Leg(d['key'], d['game_id'], d['ep'], d['league'], d['matchup'], d.get('start', ''), 'pre', d['kind'], d['pick'],
                float(d['p']), d.get('price'), [Source(**s) for s in d.get('sources', [])], list(d.get('notes', [])), False,
-               meta=d.get('meta', {}), edge=d.get('edge'))
+               meta=d.get('meta', {}), edge=d.get('edge'), quotes=list(d.get('quotes', [])), info=dict(d.get('info', {})))
 
 
 # ── Collecting candidate legs ────────────────────────────────────────────────
 
 _CACHE: Dict[tuple, Tuple[float, Any]] = {}
 CACHE_TTL = 90
+
+
+def _form_view(f: Dict) -> Dict:
+    if not f or not f.get('n'):
+        return {}
+    keep = ('n', 'wins', 'losses', 'pf', 'pa', 'margin', 'last5', 'rating', 'streak')
+    return {k: (round(f[k], 2) if isinstance(f.get(k), float) else f.get(k)) for k in keep if k in f}
+
+
+def _decorate(legs: List[Leg], g: Dict, pred: Optional[Dict], fh: Dict, fa: Dict, inj_h: Dict, inj_a: Dict,
+              engine_p: Optional[float], blend_w: float) -> None:
+    """Attach ESPN and Kalshi prices and the game and team facts behind the numbers to every leg of one game."""
+    import parlay_pricing as PP
+    game = {'matchup': f"{g['away']} at {g['home']}", 'start': g['start'], 'tv': g.get('tv', ''), 'espn_book': g.get('book', ''),
+            'lines': {'spread (home)': g.get('spread'), 'total': g.get('total'), 'home moneyline': g.get('home_ml'),
+                      'away moneyline': g.get('away_ml')},
+            'kalshi_home_win': g.get('kalshi_home'), 'engine_home_win': engine_p, 'model_weight_vs_market': blend_w,
+            'form_home': _form_view(fh), 'form_away': _form_view(fa),
+            'model': None if not pred else {k: round(float(v), 2) for k, v in pred.items() if isinstance(v, (int, float))},
+            'injuries_home': inj_h.get('players', [])[:6], 'injuries_away': inj_a.get('players', [])[:6]}
+    for l in legs:
+        if l.kind in ('ml', 'spread', 'total'):
+            l.quotes += PP.espn_quotes(g, l.kind, l.meta['side'])
+            if l.kind == 'ml':
+                l.quotes += PP.kalshi_quote(g, l.meta['side'])
+            l.info = dict(game)
+        else:
+            l.info = {**l.info, 'game': game}
 
 
 def collect_legs(db: Any, worker: Any, season_for: Callable[[str], int], label: Callable[[str], str],
@@ -444,7 +478,7 @@ def collect_legs(db: Any, worker: Any, season_for: Callable[[str], int], label: 
     w_all = dict(BLEND)
     w_all.update(blend or {})
 
-    def one_league(ep: str, grp: pd.DataFrame) -> Tuple[List[Leg], int]:
+    def one_league(ep: str, grp: pd.DataFrame) -> Tuple[List[Leg], int, Dict[str, Dict]]:
         grp = grp.assign(_live=grp['state'].eq('in')).sort_values(['_live', 'start'], ascending=[False, True]).head(per_league)
         cat, spt = ep.split('/')
         season = season_for(cat)
@@ -460,12 +494,16 @@ def collect_legs(db: Any, worker: Any, season_for: Callable[[str], int], label: 
         pas = [f['pa'] for f in forms.values() if f.get('n')]
         avg_pa = sum(pas) / len(pas) if pas else None
         out: List[Leg] = []
+        seen_games: Dict[str, Dict] = {}
         for g in grp.to_dict('records'):
+            seen_games[str(g['id'])] = g
+            first = len(out)
             fh, fa = forms.get(g['home_id'], {'n': 0}), forms.get(g['away_id'], {'n': 0})
-            pred = None
+            pred, inj_h, inj_a = None, {'penalty': 0.0, 'players': []}, {'penalty': 0.0, 'players': []}
             if fh.get('n') and fa.get('n'):
-                ph = injury_penalty(db, ep, g['home_id'], g['home_abbr'], fh.get('pf', 0))['penalty']
-                pa = injury_penalty(db, ep, g['away_id'], g['away_abbr'], fa.get('pf', 0))['penalty']
+                inj_h = injury_penalty(db, ep, g['home_id'], g['home_abbr'], fh.get('pf', 0))
+                inj_a = injury_penalty(db, ep, g['away_id'], g['away_abbr'], fa.get('pf', 0))
+                ph, pa = inj_h['penalty'], inj_a['penalty']
                 pred = predict(ep, fh, fa, ph, pa)
             bw = w_all.get(ep, 0.3)
             lp = None
@@ -488,23 +526,41 @@ def collect_legs(db: Any, worker: Any, season_for: Callable[[str], int], label: 
                 for abbr, tid, opp in ((g['home_abbr'], g['home_id'], fa), (g['away_abbr'], g['away_id'], fh)):
                     of = (opp.get('pa') / avg_pa) if opp.get('n') and avg_pa else 1.0
                     out += player_legs(db, g, abbr, tid, of)
-        return out, int(len(grp))
+            _decorate(out[first:], g, pred, fh, fa, inj_h, inj_a, eng, bw)
+        return out, int(len(grp)), seen_games
 
     legs: List[Leg] = []
+    all_games: Dict[str, Dict] = {}
     groups = [(ep, grp) for ep, grp in keep.groupby('ep')]
     with ThreadPoolExecutor(max_workers=3) as pool:
         futs = {pool.submit(one_league, ep, grp): ep for ep, grp in groups}
         for f in as_completed(futs):
             ep = futs[f]
             try:
-                ls, n_games = f.result()
+                ls, n_games, gms = f.result()
                 legs += ls
+                all_games.update(gms)
                 info['leagues'][ep] = {'label': label(ep), 'games': n_games, 'legs': len(ls)}
                 say(f'{label(ep)}: {n_games} games priced, {len(ls)} candidate legs')
             except Exception as exc:  # one league failing must not sink the page
                 info['errors'][ep] = str(exc)[:120]
                 say(f'{label(ep)}: skipped ({str(exc)[:80]})')
     info['skipped'] = [label(e) for e in eps if e not in info['leagues']]
+    if True:
+        say('Fetching sportsbook prices (Unabated)...')
+        try:
+            import parlay_pricing
+            info['pricing'] = parlay_pricing.attach_unabated(legs, all_games)
+        except Exception as exc:  # prices are an add-on: never lose the legs because a price feed failed
+            info['pricing'] = {'errors': [str(exc)[:100]], 'leagues': {}}
+    try:
+        import parlay_pricing as _pp
+        for l in legs:
+            bq = _pp._book_quotes(l)
+            if bq:
+                l.price = max(bq.values(), key=lambda q: q['decimal'])['price']
+    except Exception:
+        pass
     res = (legs, info)
     _CACHE[key] = (time.time(), res)
     kept = drop_unbettable(legs)

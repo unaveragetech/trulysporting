@@ -306,6 +306,7 @@ def event_row(ep: str, ev: Dict) -> Dict:
 
     ml = odds.get('moneyline') or {}
     ps = odds.get('pointSpread') or {}
+    tt = odds.get('total') or {}
 
     def close(side, d, k='odds'):
         blk = d.get(side) or {}
@@ -324,6 +325,8 @@ def event_row(ep: str, ev: Dict) -> Dict:
         'tv': tv, 'book': (odds.get('provider') or {}).get('name', ''),
         'home_ml': close('home', ml), 'away_ml': close('away', ml),
         'spread': close('home', ps, 'line') if ps else num(odds.get('spread')), 'total': num(odds.get('overUnder')),
+        'home_spread_price': close('home', ps), 'away_spread_price': close('away', ps),
+        'over_price': close('over', tt), 'under_price': close('under', tt),
     }
 
 

@@ -16,7 +16,7 @@ import streamlit as st
 # "night game" palette with lowered saturation so bright accents do not glare.
 LIGHT: Dict[str, str] = {
     "--ts-bg": "#eef1f6", "--ts-card": "#fbfcfe", "--ts-card2": "#e9edf4", "--ts-ink": "#1b2536",
-    "--ts-muted": "#5b6980", "--ts-line": "#d9dfe9", "--ts-brand": "#15803d", "--ts-brand-ink": "#166534",
+    "--ts-muted": "#4b596f", "--ts-line": "#c3ccda", "--ts-edge": "#8995ab", "--ts-brand": "#15803d", "--ts-brand-ink": "#14632f",
     "--ts-brand-soft": "#dcf2e3", "--ts-accent": "#d97706", "--ts-good": "#15803d", "--ts-bad": "#dc2626",
     "--ts-live": "#dc2626", "--ts-live-soft": "#fde4e4", "--ts-final-soft": "#e3e8f0", "--ts-header-bg": "rgba(238,241,246,.92)",
     "--ts-shadow": "0 1px 2px rgba(20,30,50,.05), 0 6px 18px rgba(20,30,50,.07)",
@@ -24,7 +24,7 @@ LIGHT: Dict[str, str] = {
 }
 DARK: Dict[str, str] = {
     "--ts-bg": "#0b101a", "--ts-card": "#131b2a", "--ts-card2": "#1a2437", "--ts-ink": "#e6ebf4",
-    "--ts-muted": "#93a1b8", "--ts-line": "#263249", "--ts-brand": "#4ade80", "--ts-brand-ink": "#86efac",
+    "--ts-muted": "#a9b6cb", "--ts-line": "#33425d", "--ts-edge": "#5f7396", "--ts-brand": "#4ade80", "--ts-brand-ink": "#86efac",
     "--ts-brand-soft": "rgba(74,222,128,.13)", "--ts-accent": "#fbbf24", "--ts-good": "#4ade80", "--ts-bad": "#f87171",
     "--ts-live": "#fb7185", "--ts-live-soft": "rgba(251,113,133,.16)", "--ts-final-soft": "rgba(147,161,184,.16)",
     "--ts-header-bg": "rgba(11,16,26,.9)",
@@ -157,9 +157,30 @@ a { color: var(--ts-brand-ink); }
 @media (prefers-reduced-motion: no-preference) { .stButton > button { transition: transform .08s ease, box-shadow .15s ease; }
   .stButton > button:hover { transform: translateY(-1px); } }
 
+/* Buttons and controls: readable text and a visible edge in every mode */
+.stButton > button, .stDownloadButton > button, .stFormSubmitButton > button, [data-testid^="stBaseButton"], a[data-testid^="stBaseLinkButton"] {
+  background: var(--ts-card) !important; color: var(--ts-ink) !important; border: 1px solid var(--ts-edge) !important; font-weight: 600; }
+.stButton > button p, .stDownloadButton > button p, [data-testid^="stBaseButton"] p, a[data-testid^="stBaseLinkButton"] p { color: inherit !important; }
+.stButton > button:hover, .stDownloadButton > button:hover, [data-testid^="stBaseButton"]:hover, a[data-testid^="stBaseLinkButton"]:hover {
+  border-color: var(--ts-brand) !important; color: var(--ts-ink) !important; background: var(--ts-card2) !important; }
+[data-testid="stBaseButton-primary"], .stButton > button[kind="primary"] { background: var(--ts-brand) !important; border-color: var(--ts-brand) !important;
+  color: var(--ts-on-brand) !important; }
+[data-testid="stBaseButton-primary"] p { color: var(--ts-on-brand) !important; }
+[data-testid="stBaseButton-primary"]:hover { filter: brightness(1.08); background: var(--ts-brand) !important; color: var(--ts-on-brand) !important; }
+[data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] p, [data-testid="stRadio"] label p, [data-testid="stCheckbox"] label p,
+[data-testid="stToggle"] label p, [data-testid="stSlider"] label p, [data-testid="stMultiSelect"] label p, [data-testid="stSelectbox"] label p {
+  color: var(--ts-ink) !important; }
+[data-testid="stSegmentedControl"] button, [data-testid="stPills"] button { background: var(--ts-card) !important; color: var(--ts-ink) !important;
+  border: 1px solid var(--ts-edge) !important; }
+[data-testid="stSegmentedControl"] button[aria-checked="true"], [data-testid="stSegmentedControl"] button[kind*="Active"],
+[data-testid="stPills"] button[aria-checked="true"] { background: var(--ts-brand-soft) !important; border-color: var(--ts-brand) !important; }
+[data-testid="stSegmentedControl"] button p { color: inherit !important; }
+[data-baseweb="tag"] { background: var(--ts-brand-soft) !important; }
+[data-baseweb="tag"] span { color: var(--ts-ink) !important; }
+
 /* Inputs get a visible edge so fields never melt into the page */
 [data-baseweb="input"] > div, [data-baseweb="base-input"], [data-baseweb="select"] > div, [data-baseweb="textarea"] {
-  background: var(--ts-card) !important; border: 1px solid var(--ts-line) !important; border-radius: 10px !important; }
+  background: var(--ts-card) !important; border: 1px solid var(--ts-edge) !important; border-radius: 10px !important; }
 [data-baseweb="input"] input, [data-baseweb="select"] div, textarea { color: var(--ts-ink) !important; }
 [data-baseweb="input"] input::placeholder { color: var(--ts-muted) !important; opacity: .8; }
 
@@ -212,16 +233,64 @@ DARK_ONLY = """
 .stApp { color-scheme: dark; }
 img[src*="espncdn"], img[src*="logo"] { filter: drop-shadow(0 0 1px rgba(255,255,255,.35)); }
 .ts-logo { filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
+
+/* text Streamlit colours itself */
+.stApp, .stApp p, .stApp li, .stApp label, .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+[data-testid="stMarkdownContainer"], [data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li,
+[data-testid="stMarkdownContainer"] strong, [data-testid="stText"], [data-testid="stHeadingWithActionElements"] * { color: var(--ts-ink); }
+[data-testid="stMarkdownContainer"] a, .stApp a { color: var(--ts-brand-ink); }
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p, .stCaption { color: var(--ts-muted) !important; }
+[data-testid="stHeader"], [data-testid="stHeader"] *, [data-testid="stStatusWidget"], [data-testid="stStatusWidget"] * { color: var(--ts-ink) !important; }
+[data-testid="stToolbar"] button, [data-testid="stToolbar"] svg { color: var(--ts-ink) !important; fill: var(--ts-ink) !important; }
+
+/* radios, checkboxes, toggles, sliders */
+[data-baseweb="radio"]:not(:has(input:checked)) > div:first-child { background: var(--ts-card2) !important; border-color: var(--ts-edge) !important; }
+[data-baseweb="radio"]:has(input:checked) > div:first-child { background: var(--ts-brand) !important; border-color: var(--ts-brand) !important; }
+[data-baseweb="checkbox"] > span:first-child, [data-baseweb="checkbox"] > div:first-child { border-color: var(--ts-edge) !important; }
+[data-baseweb="checkbox"] input:not(:checked) + div, [data-baseweb="checkbox"] input:not(:checked) ~ span { background: var(--ts-card2) !important; }
+[data-testid="stSlider"] [data-baseweb="slider"] div[role="slider"] { background: var(--ts-brand) !important; }
+[data-testid="stSlider"] [data-testid="stTickBarMin"], [data-testid="stSlider"] [data-testid="stTickBarMax"],
+[data-testid="stSlider"] [data-testid="stThumbValue"] { color: var(--ts-ink) !important; }
+[data-testid="stSliderThumbValue"], [data-testid="stSliderThumbValue"] * { color: var(--ts-on-brand) !important; }
+
+/* menus, popovers, select lists, tooltips, dialogs */
+[data-baseweb="popover"] > div, [data-baseweb="popover"] ul, [data-baseweb="menu"], [role="listbox"], ul[role="listbox"] {
+  background: var(--ts-card) !important; color: var(--ts-ink) !important; }
+[data-baseweb="popover"] li, [data-baseweb="menu"] li, [role="option"], [role="option"] * { background: var(--ts-card) !important; color: var(--ts-ink) !important; }
+[data-baseweb="popover"] li:hover, [role="option"]:hover, [role="option"][aria-selected="true"] { background: var(--ts-card2) !important; }
+[data-testid="stTooltipContent"], [data-baseweb="tooltip"] > div, div[data-baseweb="tooltip"] { background: var(--ts-card2) !important; color: var(--ts-ink) !important; }
+div[role="dialog"], [data-testid="stDialog"] > div > div { background: var(--ts-card) !important; color: var(--ts-ink) !important; border: 1px solid var(--ts-line); }
+div[role="dialog"] *, [data-testid="stDialog"] * { color: var(--ts-ink); }
+div[role="dialog"] button, [data-testid="stDialog"] button { color: var(--ts-ink) !important; }
+
+/* alerts and status boxes */
+[data-testid="stAlert"], [data-testid="stAlertContainer"] { background: var(--ts-card2) !important; border: 1px solid var(--ts-edge) !important; color: var(--ts-ink) !important; }
+[data-testid="stAlert"] *, [data-testid="stAlertContainer"] * { color: var(--ts-ink) !important; }
+[data-testid="stExpander"] summary, [data-testid="stExpander"] summary * { color: var(--ts-ink) !important; }
+[data-testid="stExpander"] details { background: var(--ts-card) !important; }
+[data-testid="stStatus"], [data-testid="stStatus"] * { color: var(--ts-ink) !important; }
+
+/* tables, code, json */
+table, th, td { color: var(--ts-ink) !important; border-color: var(--ts-line) !important; }
+th { background: var(--ts-card2) !important; }
+pre, code, [data-testid="stCode"], .stJson, [data-testid="stJson"] { background: var(--ts-card2) !important; color: var(--ts-ink) !important; }
+
+/* st.dataframe / st.data_editor draw on a canvas with their own light palette: invert it for dark mode */
+[data-testid="stDataFrame"] canvas, [data-testid="stDataFrameResizable"] canvas, [data-testid="stDataFrameGlideDataEditor"] canvas {
+  filter: invert(0.9) hue-rotate(180deg); }
+[data-testid="stDataFrame"], [data-testid="stDataFrameResizable"] { background: var(--ts-card) !important; }
+[data-testid="stElementToolbar"] { background: var(--ts-card2) !important; border: 1px solid var(--ts-line); }
+[data-testid="stElementToolbar"] button, [data-testid="stElementToolbar"] svg { color: var(--ts-ink) !important; fill: var(--ts-ink) !important; }
 """
 
 
 def current_mode() -> str:
-    """'light', 'dark' or 'auto' from the ``theme`` URL option the switch sets (Streamlit hides embed_options)."""
+    """'light' (the default) or 'dark', from the ``theme`` URL option the switch sets (Streamlit hides embed_options)."""
     try:
         v = str(st.query_params.get("theme", "")).lower()
     except Exception:
-        return "auto"
-    return v if v in ("light", "dark") else "auto"
+        return "light"
+    return "dark" if v == "dark" else "light"
 
 
 def css(mode: str = "auto") -> str:
@@ -253,29 +322,29 @@ LOGO_SVG = ('<img class="ts-logo" alt="" src="data:image/svg+xml;base64,'
             + base64.b64encode(_LOGO_SVG.encode()).decode() + '">')
 
 
-_NATIVE = {"light": "light_theme", "dark": "dark_theme"}
-
-
 def _href(mode: str) -> str:
-    """Current URL params with the theme set (auto removes both options)."""
+    """Current URL params with the theme chosen.  Light is the default, so choosing it just removes the option."""
     try:
         params = {k: v for k, v in st.query_params.items() if k not in ("theme", "embed_options")}
     except Exception:
         params = {}
-    if mode in _NATIVE:
-        params["theme"] = mode
-        params["embed_options"] = _NATIVE[mode]
+    if mode == "dark":
+        params["theme"] = "dark"
     return "?" + urlencode(params)
 
 
+def ensure_default_light() -> None:
+    """Light is the default for everyone (the config pins Streamlit's light theme); nothing to do."""
+
+
 def switch_html(mode: str) -> str:
-    """Auto / Light / Dark links; each reloads with the matching Streamlit theme option, keeping other URL params."""
-    items = [("auto", "Auto"), ("light", "☀ Light"), ("dark", "☾ Dark")]
+    """Light / Dark links; each reloads with the matching Streamlit theme option, keeping other URL params."""
+    items = [("light", "☀ Light"), ("dark", "☾ Dark")]
     links = "".join(f'<a class="{"on" if m == mode else ""}" href="{_href(m)}" target="_self">{lbl}</a>' for m, lbl in items)
     return f'<div class="ts-theme" role="group" aria-label="Colour theme">{links}</div>'
 
 
 def cycle_html(mode: str) -> str:
-    """One-tap theme cycle (auto -> dark -> light) shown on phones, where the full switch does not fit."""
-    nxt, icon = {"auto": ("dark", "🌓"), "dark": ("light", "☾"), "light": ("auto", "☀")}[mode]
-    return f'<a class="ts-theme-cycle" href="{_href(nxt)}" target="_self" title="Switch colour theme">{icon}</a>'
+    """One-tap theme switch shown on phones, where the full switch does not fit."""
+    nxt, icon = {"light": ("dark", "☾"), "dark": ("light", "☀")}[mode]
+    return f'<a class="ts-theme-cycle" href="{_href(nxt)}" target="_self" title="Switch to {nxt} mode">{icon}</a>'
