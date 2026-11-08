@@ -1,0 +1,2236 @@
+[
+    {
+        "scraped_date": "2026-04-21 22:30:54 UTC",
+        "match_date": "2026-04-23 23:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/atlanta-hawks-xAO4gBas/new-york-knicks-WCNO4nbt/#nTPkYS3K",
+        "home_team": "Atlanta Hawks",
+        "away_team": "New York Knicks",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "State Farm Arena",
+        "venue_town": "Atlanta, GA",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "-244",
+                "2": "+200",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-250",
+                "2": "+200",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-213",
+                "2": "+179",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:30:56 UTC",
+        "match_date": "2026-04-23 01:30:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/oklahoma-city-thunder-0fHFHEWD/phoenix-suns-M1Gy2pra/#tlUTz35K",
+        "home_team": "Oklahoma City Thunder",
+        "away_team": "Phoenix Suns",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Paycom Center",
+        "venue_town": "Oklahoma, OK",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "-2000",
+                "2": "+1100",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-2500",
+                "2": "+1050",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-2000",
+                "2": "+1100",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:30:55 UTC",
+        "match_date": "2026-04-23 23:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/atlanta-hawks-xAO4gBas/new-york-knicks-WCNO4nbt/#raBLS6Rs",
+        "home_team": "Atlanta Hawks",
+        "away_team": "New York Knicks",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "State Farm Arena",
+        "venue_town": "Atlanta, GA",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "-110",
+                "2": "-110",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-110",
+                "2": "-110",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-106",
+                "2": "-110",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:31:12 UTC",
+        "match_date": "2026-04-24 01:30:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/denver-nuggets-CxvW27TI/minnesota-timberwolves-KjBIVQcI/#Yomw7j5L",
+        "home_team": "Minnesota Timberwolves",
+        "away_team": "Denver Nuggets",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Target Center",
+        "venue_town": "Minneapolis, MN",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "-303",
+                "2": "+245",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-303",
+                "2": "+240",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-294",
+                "2": "+235",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:31:13 UTC",
+        "match_date": "2026-04-22 00:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/portland-trail-blazers-4Awl14c5/san-antonio-spurs-IwmkErSH/#ruuPcnS7",
+        "home_team": "San Antonio Spurs",
+        "away_team": "Portland Trail Blazers",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Frost Bank Center",
+        "venue_town": "San Antonio, TX",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "-714",
+                "2": "+500",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-714",
+                "2": "+500",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-625",
+                "2": "+459",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:31:14 UTC",
+        "match_date": "2026-04-24 00:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/cleveland-cavaliers-xGk13Tb6/toronto-raptors-CxtbCMdU/#neKdCos1",
+        "home_team": "Toronto Raptors",
+        "away_team": "Cleveland Cavaliers",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Scotiabank Arena",
+        "venue_town": "Toronto, ON",
+        "venue_country": "Canada",
+        "home_away_market": [
+            {
+                "1": "+129",
+                "2": "-154",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "+135",
+                "2": "-161",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "+129",
+                "2": "-154",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:31:30 UTC",
+        "match_date": "2026-04-24 01:30:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/denver-nuggets-CxvW27TI/minnesota-timberwolves-KjBIVQcI/#UHY81USr",
+        "home_team": "Minnesota Timberwolves",
+        "away_team": "Denver Nuggets",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Target Center",
+        "venue_town": "Minneapolis, MN",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "+110",
+                "2": "-130",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "+104",
+                "2": "-128",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "+110",
+                "2": "-130",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:31:33 UTC",
+        "match_date": "2017-03-09 17:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/cleveland-cavaliers-0j2eUlMC/toronto-raptors-EXCPojim/#Aonqhgqt",
+        "home_team": "Moravske Budejovice",
+        "away_team": "Decin",
+        "league_name": "2. Liga - Central 2016/2017",
+        "home_score": "4",
+        "away_score": "1",
+        "partial_results": "1:1, 1:0, 2:0",
+        "venue": null,
+        "venue_town": null,
+        "venue_country": "",
+        "home_away_market": []
+    },
+    {
+        "scraped_date": "2026-04-21 22:31:34 UTC",
+        "match_date": "2026-04-21 23:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/boston-celtics-KYD9hVEm/philadelphia-76ers-vwRW2QSh/#C84vyaKO",
+        "home_team": "Boston Celtics",
+        "away_team": "Philadelphia 76ers",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "TD Garden",
+        "venue_town": "Boston, MA",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "-833",
+                "2": "+575",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-909",
+                "2": "+575",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-769",
+                "2": "+560",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:31:50 UTC",
+        "match_date": "2026-04-22 02:30:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/houston-rockets-Sr9PQALP/los-angeles-lakers-ngegZ8bg/#dMHyPOQ6",
+        "home_team": "Los Angeles Lakers",
+        "away_team": "Houston Rockets",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Crypto.com Arena",
+        "venue_town": "Los Angeles, CA",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "+175",
+                "2": "-208",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "+170",
+                "2": "-208",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "+179",
+                "2": "-213",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:31:52 UTC",
+        "match_date": "2026-04-22 23:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/detroit-pistons-UcjMRj6J/orlando-magic-QZMS36Dn/#lfN0D87d",
+        "home_team": "Detroit Pistons",
+        "away_team": "Orlando Magic",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Little Caesars Arena",
+        "venue_town": "Detroit, MI",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "-400",
+                "2": "+320",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-417",
+                "2": "+320",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-385",
+                "2": "+309",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:38:39 UTC",
+        "match_date": "2026-04-22 23:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/detroit-pistons-UcjMRj6J/orlando-magic-QZMS36Dn/#lfN0D87d",
+        "home_team": "Detroit Pistons",
+        "away_team": "Orlando Magic",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Little Caesars Arena",
+        "venue_town": "Detroit, MI",
+        "venue_country": "USA",
+        "over_under_games_215_5_market": [
+            {
+                "submarket_name": "Over/Under +208.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-278",
+                "odds_under": "+220"
+            },
+            {
+                "submarket_name": "Over/Under +209.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-238",
+                "odds_under": "+195"
+            },
+            {
+                "submarket_name": "Over/Under +210.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-222",
+                "odds_under": "+179"
+            },
+            {
+                "submarket_name": "Over/Under +211.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-200",
+                "odds_under": "+165"
+            },
+            {
+                "submarket_name": "Over/Under +212.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-189",
+                "odds_under": "+154"
+            },
+            {
+                "submarket_name": "Over/Under +213.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-169",
+                "odds_under": "+140"
+            },
+            {
+                "submarket_name": "Over/Under +214.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-154",
+                "odds_under": "+125"
+            },
+            {
+                "submarket_name": "Over/Under +215.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-143",
+                "odds_under": "+118"
+            },
+            {
+                "submarket_name": "Over/Under +216.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-133",
+                "odds_under": "+110"
+            },
+            {
+                "submarket_name": "Over/Under +217.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-120",
+                "odds_under": "+100"
+            },
+            {
+                "submarket_name": "Over/Under +218.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-110",
+                "odds_under": "-110"
+            },
+            {
+                "submarket_name": "Over/Under +219.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-102",
+                "odds_under": "-118"
+            },
+            {
+                "submarket_name": "Over/Under +220.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+104",
+                "odds_under": "-128"
+            },
+            {
+                "submarket_name": "Over/Under +221.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+114",
+                "odds_under": "-139"
+            },
+            {
+                "submarket_name": "Over/Under +222.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+125",
+                "odds_under": "-154"
+            },
+            {
+                "submarket_name": "Over/Under +223.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+135",
+                "odds_under": "-167"
+            },
+            {
+                "submarket_name": "Over/Under +224.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+150",
+                "odds_under": "-182"
+            },
+            {
+                "submarket_name": "Over/Under +225.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+165",
+                "odds_under": "-200"
+            },
+            {
+                "submarket_name": "Over/Under +226.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+170",
+                "odds_under": "-208"
+            },
+            {
+                "submarket_name": "Over/Under +227.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+190",
+                "odds_under": "-238"
+            },
+            {
+                "submarket_name": "Over/Under +228.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+200",
+                "odds_under": "-250"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:38:40 UTC",
+        "match_date": "2026-04-22 00:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/portland-trail-blazers-4Awl14c5/san-antonio-spurs-IwmkErSH/#ruuPcnS7",
+        "home_team": "San Antonio Spurs",
+        "away_team": "Portland Trail Blazers",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Frost Bank Center",
+        "venue_town": "San Antonio, TX",
+        "venue_country": "USA",
+        "over_under_games_215_5_market": [
+            {
+                "submarket_name": "Over/Under +210.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-250",
+                "odds_under": "+200"
+            },
+            {
+                "submarket_name": "Over/Under +211.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-238",
+                "odds_under": "+190"
+            },
+            {
+                "submarket_name": "Over/Under +212.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-208",
+                "odds_under": "+170"
+            },
+            {
+                "submarket_name": "Over/Under +213.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-200",
+                "odds_under": "+165"
+            },
+            {
+                "submarket_name": "Over/Under +214.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-179",
+                "odds_under": "+145"
+            },
+            {
+                "submarket_name": "Over/Under +215.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-167",
+                "odds_under": "+135"
+            },
+            {
+                "submarket_name": "Over/Under +216.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-154",
+                "odds_under": "+125"
+            },
+            {
+                "submarket_name": "Over/Under +217.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-139",
+                "odds_under": "+114"
+            },
+            {
+                "submarket_name": "Over/Under +218.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-128",
+                "odds_under": "+104"
+            },
+            {
+                "submarket_name": "Over/Under +219.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-118",
+                "odds_under": "-102"
+            },
+            {
+                "submarket_name": "Over/Under +220.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-110",
+                "odds_under": "-110"
+            },
+            {
+                "submarket_name": "Over/Under +221.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+100",
+                "odds_under": "-120"
+            },
+            {
+                "submarket_name": "Over/Under +222.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+110",
+                "odds_under": "-133"
+            },
+            {
+                "submarket_name": "Over/Under +223.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+118",
+                "odds_under": "-143"
+            },
+            {
+                "submarket_name": "Over/Under +224.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+125",
+                "odds_under": "-154"
+            },
+            {
+                "submarket_name": "Over/Under +225.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+140",
+                "odds_under": "-169"
+            },
+            {
+                "submarket_name": "Over/Under +226.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+150",
+                "odds_under": "-182"
+            },
+            {
+                "submarket_name": "Over/Under +227.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+165",
+                "odds_under": "-200"
+            },
+            {
+                "submarket_name": "Over/Under +228.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+179",
+                "odds_under": "-222"
+            },
+            {
+                "submarket_name": "Over/Under +229.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+195",
+                "odds_under": "-238"
+            },
+            {
+                "submarket_name": "Over/Under +230.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+220",
+                "odds_under": "-278"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:38:40 UTC",
+        "match_date": "2026-04-23 23:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/atlanta-hawks-xAO4gBas/new-york-knicks-WCNO4nbt/#nTPkYS3K",
+        "home_team": "Atlanta Hawks",
+        "away_team": "New York Knicks",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "State Farm Arena",
+        "venue_town": "Atlanta, GA",
+        "venue_country": "USA",
+        "over_under_games_215_5_market": [
+            {
+                "submarket_name": "Over/Under +206.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +207.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-294",
+                "odds_under": "+210"
+            },
+            {
+                "submarket_name": "Over/Under +208.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-278",
+                "odds_under": "+200"
+            },
+            {
+                "submarket_name": "Over/Under +209.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-238",
+                "odds_under": "+179"
+            },
+            {
+                "submarket_name": "Over/Under +210.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-222",
+                "odds_under": "+165"
+            },
+            {
+                "submarket_name": "Over/Under +211.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-200",
+                "odds_under": "+150"
+            },
+            {
+                "submarket_name": "Over/Under +212.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-182",
+                "odds_under": "+140"
+            },
+            {
+                "submarket_name": "Over/Under +213.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-169",
+                "odds_under": "+129"
+            },
+            {
+                "submarket_name": "Over/Under +214.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-154",
+                "odds_under": "+120"
+            },
+            {
+                "submarket_name": "Over/Under +215.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-143",
+                "odds_under": "+110"
+            },
+            {
+                "submarket_name": "Over/Under +216",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +216.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-128",
+                "odds_under": "+100"
+            },
+            {
+                "submarket_name": "Over/Under +217",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +217.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-115",
+                "odds_under": "-105"
+            },
+            {
+                "submarket_name": "Over/Under +218",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-110",
+                "odds_under": "-110"
+            },
+            {
+                "submarket_name": "Over/Under +218.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-105",
+                "odds_under": "-115"
+            },
+            {
+                "submarket_name": "Over/Under +219.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+100",
+                "odds_under": "-128"
+            },
+            {
+                "submarket_name": "Over/Under +220.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+110",
+                "odds_under": "-143"
+            },
+            {
+                "submarket_name": "Over/Under +221.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+118",
+                "odds_under": "-154"
+            },
+            {
+                "submarket_name": "Over/Under +222.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+125",
+                "odds_under": "-167"
+            },
+            {
+                "submarket_name": "Over/Under +223.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+140",
+                "odds_under": "-182"
+            },
+            {
+                "submarket_name": "Over/Under +224.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+150",
+                "odds_under": "-200"
+            },
+            {
+                "submarket_name": "Over/Under +225.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+165",
+                "odds_under": "-222"
+            },
+            {
+                "submarket_name": "Over/Under +226.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+175",
+                "odds_under": "-238"
+            },
+            {
+                "submarket_name": "Over/Under +227.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+190",
+                "odds_under": "-250"
+            },
+            {
+                "submarket_name": "Over/Under +228.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:38:56 UTC",
+        "match_date": "2026-04-24 00:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/cleveland-cavaliers-xGk13Tb6/toronto-raptors-CxtbCMdU/#neKdCos1",
+        "home_team": "Toronto Raptors",
+        "away_team": "Cleveland Cavaliers",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Scotiabank Arena",
+        "venue_town": "Toronto, ON",
+        "venue_country": "Canada",
+        "over_under_games_215_5_market": [
+            {
+                "submarket_name": "Over/Under +213.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +214.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +215.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-161",
+                "odds_under": "+135"
+            },
+            {
+                "submarket_name": "Over/Under +216.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-149",
+                "odds_under": "+125"
+            },
+            {
+                "submarket_name": "Over/Under +217.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-139",
+                "odds_under": "+114"
+            },
+            {
+                "submarket_name": "Over/Under +218.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-125",
+                "odds_under": "+104"
+            },
+            {
+                "submarket_name": "Over/Under +219.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-110",
+                "odds_under": "-105"
+            },
+            {
+                "submarket_name": "Over/Under +220.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-105",
+                "odds_under": "-115"
+            },
+            {
+                "submarket_name": "Over/Under +221.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+104",
+                "odds_under": "-125"
+            },
+            {
+                "submarket_name": "Over/Under +222.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+110",
+                "odds_under": "-133"
+            },
+            {
+                "submarket_name": "Over/Under +223.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+120",
+                "odds_under": "-143"
+            },
+            {
+                "submarket_name": "Over/Under +224.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+135",
+                "odds_under": "-161"
+            },
+            {
+                "submarket_name": "Over/Under +225.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+140",
+                "odds_under": "-169"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:38:58 UTC",
+        "match_date": "2017-03-09 17:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/cleveland-cavaliers-0j2eUlMC/toronto-raptors-EXCPojim/#Aonqhgqt",
+        "home_team": "Moravske Budejovice",
+        "away_team": "Decin",
+        "league_name": "2. Liga - Central 2016/2017",
+        "home_score": "4",
+        "away_score": "1",
+        "partial_results": "1:1, 1:0, 2:0",
+        "venue": null,
+        "venue_town": null,
+        "venue_country": "",
+        "over_under_games_215_5_market": []
+    },
+    {
+        "scraped_date": "2026-04-21 22:38:57 UTC",
+        "match_date": "2026-04-23 01:30:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/oklahoma-city-thunder-0fHFHEWD/phoenix-suns-M1Gy2pra/#tlUTz35K",
+        "home_team": "Oklahoma City Thunder",
+        "away_team": "Phoenix Suns",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Paycom Center",
+        "venue_town": "Oklahoma, OK",
+        "venue_country": "USA",
+        "over_under_games_215_5_market": [
+            {
+                "submarket_name": "Over/Under +204.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +205.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-278",
+                "odds_under": "+220"
+            },
+            {
+                "submarket_name": "Over/Under +206.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-238",
+                "odds_under": "+195"
+            },
+            {
+                "submarket_name": "Over/Under +207.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-222",
+                "odds_under": "+179"
+            },
+            {
+                "submarket_name": "Over/Under +208.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-200",
+                "odds_under": "+165"
+            },
+            {
+                "submarket_name": "Over/Under +209.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-182",
+                "odds_under": "+150"
+            },
+            {
+                "submarket_name": "Over/Under +210.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-169",
+                "odds_under": "+140"
+            },
+            {
+                "submarket_name": "Over/Under +211.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-149",
+                "odds_under": "+125"
+            },
+            {
+                "submarket_name": "Over/Under +212.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-143",
+                "odds_under": "+118"
+            },
+            {
+                "submarket_name": "Over/Under +213.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-125",
+                "odds_under": "+104"
+            },
+            {
+                "submarket_name": "Over/Under +214",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +214.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-118",
+                "odds_under": "-102"
+            },
+            {
+                "submarket_name": "Over/Under +215",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +215.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-110",
+                "odds_under": "-110"
+            },
+            {
+                "submarket_name": "Over/Under +216.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+100",
+                "odds_under": "-120"
+            },
+            {
+                "submarket_name": "Over/Under +217.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+110",
+                "odds_under": "-133"
+            },
+            {
+                "submarket_name": "Over/Under +218.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+118",
+                "odds_under": "-143"
+            },
+            {
+                "submarket_name": "Over/Under +219.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+125",
+                "odds_under": "-154"
+            },
+            {
+                "submarket_name": "Over/Under +220.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+140",
+                "odds_under": "-169"
+            },
+            {
+                "submarket_name": "Over/Under +221.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+150",
+                "odds_under": "-182"
+            },
+            {
+                "submarket_name": "Over/Under +222.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+165",
+                "odds_under": "-200"
+            },
+            {
+                "submarket_name": "Over/Under +223.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+179",
+                "odds_under": "-222"
+            },
+            {
+                "submarket_name": "Over/Under +224.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+195",
+                "odds_under": "-238"
+            },
+            {
+                "submarket_name": "Over/Under +225.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+220",
+                "odds_under": "-278"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:39:13 UTC",
+        "match_date": "2026-04-24 01:30:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/denver-nuggets-CxvW27TI/minnesota-timberwolves-KjBIVQcI/#Yomw7j5L",
+        "home_team": "Minnesota Timberwolves",
+        "away_team": "Denver Nuggets",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Target Center",
+        "venue_town": "Minneapolis, MN",
+        "venue_country": "USA",
+        "over_under_games_215_5_market": [
+            {
+                "submarket_name": "Over/Under +220.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +221.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +222.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +223.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-250",
+                "odds_under": "+200"
+            },
+            {
+                "submarket_name": "Over/Under +224.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-238",
+                "odds_under": "+190"
+            },
+            {
+                "submarket_name": "Over/Under +225.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-208",
+                "odds_under": "+170"
+            },
+            {
+                "submarket_name": "Over/Under +226.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-200",
+                "odds_under": "+165"
+            },
+            {
+                "submarket_name": "Over/Under +227.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-182",
+                "odds_under": "+150"
+            },
+            {
+                "submarket_name": "Over/Under +228.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-161",
+                "odds_under": "+135"
+            },
+            {
+                "submarket_name": "Over/Under +229.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-149",
+                "odds_under": "+125"
+            },
+            {
+                "submarket_name": "Over/Under +230.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-139",
+                "odds_under": "+114"
+            },
+            {
+                "submarket_name": "Over/Under +231",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +231.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-125",
+                "odds_under": "+104"
+            },
+            {
+                "submarket_name": "Over/Under +232",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +232.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-110",
+                "odds_under": "+100"
+            },
+            {
+                "submarket_name": "Over/Under +233.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-110",
+                "odds_under": "-110"
+            },
+            {
+                "submarket_name": "Over/Under +234.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-102",
+                "odds_under": "-118"
+            },
+            {
+                "submarket_name": "Over/Under +235.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+104",
+                "odds_under": "-128"
+            },
+            {
+                "submarket_name": "Over/Under +236.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+114",
+                "odds_under": "-139"
+            },
+            {
+                "submarket_name": "Over/Under +237.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+125",
+                "odds_under": "-154"
+            },
+            {
+                "submarket_name": "Over/Under +238.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+140",
+                "odds_under": "-169"
+            },
+            {
+                "submarket_name": "Over/Under +239.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+150",
+                "odds_under": "-182"
+            },
+            {
+                "submarket_name": "Over/Under +240.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+165",
+                "odds_under": "-200"
+            },
+            {
+                "submarket_name": "Over/Under +241.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+179",
+                "odds_under": "-222"
+            },
+            {
+                "submarket_name": "Over/Under +242.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+195",
+                "odds_under": "-238"
+            },
+            {
+                "submarket_name": "Over/Under +243.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+200",
+                "odds_under": "-250"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:39:13 UTC",
+        "match_date": "2026-04-23 23:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/atlanta-hawks-xAO4gBas/new-york-knicks-WCNO4nbt/#raBLS6Rs",
+        "home_team": "Atlanta Hawks",
+        "away_team": "New York Knicks",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "State Farm Arena",
+        "venue_town": "Atlanta, GA",
+        "venue_country": "USA",
+        "over_under_games_215_5_market": [
+            {
+                "submarket_name": "Over/Under +210.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-169",
+                "odds_under": "+140"
+            },
+            {
+                "submarket_name": "Over/Under +211.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-167",
+                "odds_under": "+135"
+            },
+            {
+                "submarket_name": "Over/Under +212.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-143",
+                "odds_under": "+120"
+            },
+            {
+                "submarket_name": "Over/Under +213.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-133",
+                "odds_under": "+110"
+            },
+            {
+                "submarket_name": "Over/Under +214.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-120",
+                "odds_under": "+100"
+            },
+            {
+                "submarket_name": "Over/Under +215.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-115",
+                "odds_under": "-105"
+            },
+            {
+                "submarket_name": "Over/Under +216",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-110",
+                "odds_under": "-110"
+            },
+            {
+                "submarket_name": "Over/Under +216.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-105",
+                "odds_under": "-115"
+            },
+            {
+                "submarket_name": "Over/Under +217",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +217.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+104",
+                "odds_under": "-128"
+            },
+            {
+                "submarket_name": "Over/Under +218.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+114",
+                "odds_under": "-139"
+            },
+            {
+                "submarket_name": "Over/Under +219.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+125",
+                "odds_under": "-154"
+            },
+            {
+                "submarket_name": "Over/Under +220.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+135",
+                "odds_under": "-167"
+            },
+            {
+                "submarket_name": "Over/Under +221.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +222.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:39:30 UTC",
+        "match_date": "2026-04-21 23:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/boston-celtics-KYD9hVEm/philadelphia-76ers-vwRW2QSh/#C84vyaKO",
+        "home_team": "Boston Celtics",
+        "away_team": "Philadelphia 76ers",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "TD Garden",
+        "venue_town": "Boston, MA",
+        "venue_country": "USA",
+        "over_under_games_215_5_market": [
+            {
+                "submarket_name": "Over/Under +205.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +206.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +207.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-278",
+                "odds_under": "+220"
+            },
+            {
+                "submarket_name": "Over/Under +208.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-250",
+                "odds_under": "+200"
+            },
+            {
+                "submarket_name": "Over/Under +209.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-227",
+                "odds_under": "+185"
+            },
+            {
+                "submarket_name": "Over/Under +210.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-208",
+                "odds_under": "+170"
+            },
+            {
+                "submarket_name": "Over/Under +211.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-189",
+                "odds_under": "+154"
+            },
+            {
+                "submarket_name": "Over/Under +212.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-175",
+                "odds_under": "+145"
+            },
+            {
+                "submarket_name": "Over/Under +213.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-161",
+                "odds_under": "+135"
+            },
+            {
+                "submarket_name": "Over/Under +214.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-149",
+                "odds_under": "+125"
+            },
+            {
+                "submarket_name": "Over/Under +215.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-133",
+                "odds_under": "+110"
+            },
+            {
+                "submarket_name": "Over/Under +216",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +216.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-125",
+                "odds_under": "+104"
+            },
+            {
+                "submarket_name": "Over/Under +217",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +217.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-115",
+                "odds_under": "-105"
+            },
+            {
+                "submarket_name": "Over/Under +218",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-110",
+                "odds_under": "-110"
+            },
+            {
+                "submarket_name": "Over/Under +218.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-105",
+                "odds_under": "-115"
+            },
+            {
+                "submarket_name": "Over/Under +219.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+104",
+                "odds_under": "-125"
+            },
+            {
+                "submarket_name": "Over/Under +220.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+114",
+                "odds_under": "-139"
+            },
+            {
+                "submarket_name": "Over/Under +221.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+125",
+                "odds_under": "-149"
+            },
+            {
+                "submarket_name": "Over/Under +222.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+135",
+                "odds_under": "-161"
+            },
+            {
+                "submarket_name": "Over/Under +223.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+145",
+                "odds_under": "-175"
+            },
+            {
+                "submarket_name": "Over/Under +224.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+154",
+                "odds_under": "-189"
+            },
+            {
+                "submarket_name": "Over/Under +225.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+170",
+                "odds_under": "-208"
+            },
+            {
+                "submarket_name": "Over/Under +226.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+185",
+                "odds_under": "-227"
+            },
+            {
+                "submarket_name": "Over/Under +227.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+200",
+                "odds_under": "-250"
+            },
+            {
+                "submarket_name": "Over/Under +228.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:39:30 UTC",
+        "match_date": "2026-04-22 02:30:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/houston-rockets-Sr9PQALP/los-angeles-lakers-ngegZ8bg/#dMHyPOQ6",
+        "home_team": "Los Angeles Lakers",
+        "away_team": "Houston Rockets",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Crypto.com Arena",
+        "venue_town": "Los Angeles, CA",
+        "venue_country": "USA",
+        "over_under_games_215_5_market": [
+            {
+                "submarket_name": "Over/Under +196.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +197.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +198.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-250",
+                "odds_under": "+200"
+            },
+            {
+                "submarket_name": "Over/Under +199.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-227",
+                "odds_under": "+185"
+            },
+            {
+                "submarket_name": "Over/Under +200.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-208",
+                "odds_under": "+170"
+            },
+            {
+                "submarket_name": "Over/Under +201.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-189",
+                "odds_under": "+154"
+            },
+            {
+                "submarket_name": "Over/Under +202.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-175",
+                "odds_under": "+145"
+            },
+            {
+                "submarket_name": "Over/Under +203.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-167",
+                "odds_under": "+135"
+            },
+            {
+                "submarket_name": "Over/Under +204.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-149",
+                "odds_under": "+125"
+            },
+            {
+                "submarket_name": "Over/Under +205.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-139",
+                "odds_under": "+114"
+            },
+            {
+                "submarket_name": "Over/Under +206",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +206.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-128",
+                "odds_under": "+104"
+            },
+            {
+                "submarket_name": "Over/Under +207",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +207.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-115",
+                "odds_under": "-105"
+            },
+            {
+                "submarket_name": "Over/Under +208",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-110",
+                "odds_under": "-110"
+            },
+            {
+                "submarket_name": "Over/Under +208.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-105",
+                "odds_under": "-115"
+            },
+            {
+                "submarket_name": "Over/Under +209.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+104",
+                "odds_under": "-125"
+            },
+            {
+                "submarket_name": "Over/Under +210.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+110",
+                "odds_under": "-133"
+            },
+            {
+                "submarket_name": "Over/Under +211.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+125",
+                "odds_under": "-149"
+            },
+            {
+                "submarket_name": "Over/Under +212.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+135",
+                "odds_under": "-161"
+            },
+            {
+                "submarket_name": "Over/Under +213.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+145",
+                "odds_under": "-175"
+            },
+            {
+                "submarket_name": "Over/Under +214.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+154",
+                "odds_under": "-189"
+            },
+            {
+                "submarket_name": "Over/Under +215.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+170",
+                "odds_under": "-208"
+            },
+            {
+                "submarket_name": "Over/Under +216.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+185",
+                "odds_under": "-227"
+            },
+            {
+                "submarket_name": "Over/Under +217.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+200",
+                "odds_under": "-250"
+            },
+            {
+                "submarket_name": "Over/Under +218.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+220",
+                "odds_under": "-278"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:39:46 UTC",
+        "match_date": "2026-04-24 01:30:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/denver-nuggets-CxvW27TI/minnesota-timberwolves-KjBIVQcI/#UHY81USr",
+        "home_team": "Minnesota Timberwolves",
+        "away_team": "Denver Nuggets",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Target Center",
+        "venue_town": "Minneapolis, MN",
+        "venue_country": "USA",
+        "over_under_games_215_5_market": [
+            {
+                "submarket_name": "Over/Under +227.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +228.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-",
+                "odds_under": "-"
+            },
+            {
+                "submarket_name": "Over/Under +229.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-161",
+                "odds_under": "+135"
+            },
+            {
+                "submarket_name": "Over/Under +230.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-149",
+                "odds_under": "+125"
+            },
+            {
+                "submarket_name": "Over/Under +231.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-139",
+                "odds_under": "+114"
+            },
+            {
+                "submarket_name": "Over/Under +232.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-128",
+                "odds_under": "+104"
+            },
+            {
+                "submarket_name": "Over/Under +233.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-118",
+                "odds_under": "-102"
+            },
+            {
+                "submarket_name": "Over/Under +234",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-110",
+                "odds_under": "-110"
+            },
+            {
+                "submarket_name": "Over/Under +234.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "-110",
+                "odds_under": "-110"
+            },
+            {
+                "submarket_name": "Over/Under +235.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+100",
+                "odds_under": "-120"
+            },
+            {
+                "submarket_name": "Over/Under +236.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+110",
+                "odds_under": "-133"
+            },
+            {
+                "submarket_name": "Over/Under +237.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+118",
+                "odds_under": "-143"
+            },
+            {
+                "submarket_name": "Over/Under +238.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+125",
+                "odds_under": "-154"
+            },
+            {
+                "submarket_name": "Over/Under +239.5",
+                "period": "FullIncludingOT",
+                "market_type": "Over/Under",
+                "extraction_mode": "passive",
+                "odds_over": "+140",
+                "odds_under": "-169"
+            }
+        ]
+    }
+]

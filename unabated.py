@@ -60,12 +60,12 @@ def tag_link(url: Optional[str], code: str) -> Optional[str]:
     return urlunparse(parts._replace(query=urlencode(q)))
 
 
-def _get(path: str, params: Optional[list] = None, odds: bool = False) -> Dict[str, Any]:
+def _get(path: str, params: Optional[list] = None, odds: bool = False, tries: int = 3) -> Dict[str, Any]:
     global _last_call
     key = api_key()
     if not key:
         raise RuntimeError('UNABATED_API_KEY is not configured')
-    for attempt in range(3):
+    for attempt in range(tries):
         with _lock:
             if odds:
                 wait = MIN_GAP - (time.time() - _last_call)
@@ -73,13 +73,13 @@ def _get(path: str, params: Optional[list] = None, odds: bool = False) -> Dict[s
                     time.sleep(wait)
                 _last_call = time.time()
             resp = requests.get(f'{BASE_URL}{path}', params=params, headers={'X-Api-Key': key}, timeout=20)
-        if resp.status_code in (429, 503) and attempt < 2:
+        if resp.status_code in (429, 503) and attempt < tries - 1:
             time.sleep(min(float(resp.headers.get('Retry-After', MIN_GAP)), 30))
             continue
         resp.raise_for_status()
         body = resp.json()
         if body.get('success') is False:
-            if attempt < 2 and 'Unexpected error' in ' '.join(body.get('messages') or []):
+            if attempt < tries - 1 and 'Unexpected error' in ' '.join(body.get('messages') or []):
                 time.sleep(MIN_GAP)  # transient upstream hiccup
                 continue
             raise RuntimeError('; '.join(body.get('messages') or ['Unabated request failed']))

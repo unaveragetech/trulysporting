@@ -1,7 +1,7 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-:root{--ink:#0f172a;--mut:#64748b;--line:#e5e9f2;--card:#fff;--bg:#f5f7fb;--brand:#2563eb;--soft:#e8efff;--red:#dc2626;--good:#16a34a;--away:#f97316;--home:#2563eb}
+:root{--ink:#0f172a;--mut:#52607a;--line:#e5e9f2;--card:#fff;--bg:#f5f7fb;--brand:#2563eb;--soft:#e8efff;--red:#dc2626;--good:#16a34a;--away:#f97316;--home:#2563eb}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 Inter,system-ui,-apple-system,'Segoe UI',sans-serif}
 button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:6px 12px;color:var(--ink);min-height:36px}
 button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
@@ -26,6 +26,16 @@ table{border-collapse:collapse;width:100%;font-size:12px}td,th{padding:3px 6px;t
 .verdict{padding:8px 10px;border-radius:10px;margin:4px 0;font-weight:600}.yes{background:#dcfce7;color:#166534}.no{background:#fee2e2;color:#991b1b}.na{background:#f1f5f9;color:#475569}
 svg{width:100%;height:auto;display:block}select,input{font:inherit;padding:6px;border:1px solid var(--line);border-radius:8px;max-width:100%}
 .chips span{display:inline-block;background:#f1f5f9;border-radius:999px;padding:3px 9px;margin:2px;font-size:12px}
+
+:root[data-theme=dark]{--ink:#e6ebf4;--mut:#a9b6cb;--line:#33425d;--card:#131b2a;--bg:#0b101a;--brand:#60a5fa;--soft:rgba(96,165,250,.16);--red:#fb7185;--good:#4ade80}
+[data-theme=dark] button.on{background:#e6ebf4;color:#0b101a;border-color:#e6ebf4}
+[data-theme=dark] .card{box-shadow:0 1px 2px rgba(0,0,0,.4)}
+[data-theme=dark] .pill{background:rgba(251,113,133,.18);color:#fda4af}[data-theme=dark] .pill.pre{background:rgba(96,165,250,.18);color:#bfdbfe}[data-theme=dark] .pill.post{background:rgba(147,161,184,.2);color:#cbd5e1}
+[data-theme=dark] .bar{background:#33425d}[data-theme=dark] .dots i{background:#33425d}
+[data-theme=dark] .play{border-bottom-color:#263249}[data-theme=dark] .play.sc{background:rgba(250,204,21,.14)}
+[data-theme=dark] .yes{background:rgba(74,222,128,.16);color:#86efac}[data-theme=dark] .no{background:rgba(248,113,113,.16);color:#fca5a5}[data-theme=dark] .na{background:#1a2437;color:#a9b6cb}
+[data-theme=dark] .chips span{background:#1a2437;color:#e6ebf4}
+[data-theme=dark] select,[data-theme=dark] input{background:var(--card);color:var(--ink)}
 </style></head><body><div id="app"></div>
 <script>
 'use strict';
@@ -43,7 +53,7 @@ let W=store('ts_watch',{games:{},teams:[],opts:{score:true,lead:true,close:true,
 /* ── Streamlit component protocol ── */
 function post(type,data){window.parent.postMessage(Object.assign({isStreamlitMessage:true,type},data),'*')}
 function fit(){post('streamlit:setFrameHeight',{height:Math.ceil(document.getElementById('app').getBoundingClientRect().height)+12})}
-window.addEventListener('message',e=>{if(e.data.type==='streamlit:render'){const first=!S.args;S.args=e.data.args;if(first){S.tab=S.args.tab||'live';boot()}fit()}});
+window.addEventListener('message',e=>{if(e.data.type==='streamlit:render'){const first=!S.args;S.args=e.data.args;document.documentElement.dataset.theme=(e.data.args&&e.data.args.theme)||'light';if(first){S.tab=S.args.tab||'live';boot()}fit()}});
 post('streamlit:componentReady',{apiVersion:1});
 new ResizeObserver(fit).observe(document.getElementById('app'));
 

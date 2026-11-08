@@ -93,7 +93,8 @@ def render_tracker(db: Any, worker: Any, leagues: List[str], season_for, label,
     def _inner():
         eps = list(dict.fromkeys(list(leagues) + ALL_ESPN_LEAGUES))
         preds = slate_predictions(db, worker, leagues, season_for)
-        _component(leagues=[{'ep': e, 'label': label(e)} for e in eps], preds=preds, tab=tab,
+        import theme
+        _component(leagues=[{'ep': e, 'label': label(e)} for e in eps], preds=preds, tab=tab, theme=theme.current_mode(),
                    key=f'ts_tracker_{tab}', default=None)
     _inner()
 

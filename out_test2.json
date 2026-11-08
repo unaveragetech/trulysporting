@@ -1,0 +1,357 @@
+[
+    {
+        "scraped_date": "2026-04-21 22:49:28 UTC",
+        "match_date": "2026-04-22 23:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/detroit-pistons-UcjMRj6J/orlando-magic-QZMS36Dn/#lfN0D87d",
+        "home_team": "Detroit Pistons",
+        "away_team": "Orlando Magic",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Little Caesars Arena",
+        "venue_town": "Detroit, MI",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "-400",
+                "2": "+320",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-417",
+                "2": "+320",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-385",
+                "2": "+309",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:49:29 UTC",
+        "match_date": "2026-04-23 01:30:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/oklahoma-city-thunder-0fHFHEWD/phoenix-suns-M1Gy2pra/#tlUTz35K",
+        "home_team": "Oklahoma City Thunder",
+        "away_team": "Phoenix Suns",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Paycom Center",
+        "venue_town": "Oklahoma, OK",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "-2000",
+                "2": "+1100",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-2500",
+                "2": "+1050",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-2000",
+                "2": "+1100",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:49:29 UTC",
+        "match_date": "2026-04-22 00:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/portland-trail-blazers-4Awl14c5/san-antonio-spurs-IwmkErSH/#ruuPcnS7",
+        "home_team": "San Antonio Spurs",
+        "away_team": "Portland Trail Blazers",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Frost Bank Center",
+        "venue_town": "San Antonio, TX",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "-714",
+                "2": "+500",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-714",
+                "2": "+500",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-667",
+                "2": "+490",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:49:47 UTC",
+        "match_date": "2026-04-23 23:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/atlanta-hawks-xAO4gBas/new-york-knicks-WCNO4nbt/#nTPkYS3K",
+        "home_team": "Atlanta Hawks",
+        "away_team": "New York Knicks",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "State Farm Arena",
+        "venue_town": "Atlanta, GA",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "-244",
+                "2": "+200",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-250",
+                "2": "+200",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-213",
+                "2": "+179",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:49:48 UTC",
+        "match_date": "2026-04-24 00:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/cleveland-cavaliers-xGk13Tb6/toronto-raptors-CxtbCMdU/#neKdCos1",
+        "home_team": "Toronto Raptors",
+        "away_team": "Cleveland Cavaliers",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Scotiabank Arena",
+        "venue_town": "Toronto, ON",
+        "venue_country": "Canada",
+        "home_away_market": [
+            {
+                "1": "+129",
+                "2": "-154",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "+125",
+                "2": "-154",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "+129",
+                "2": "-154",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:49:48 UTC",
+        "match_date": "2026-04-21 23:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/boston-celtics-KYD9hVEm/philadelphia-76ers-vwRW2QSh/#C84vyaKO",
+        "home_team": "Boston Celtics",
+        "away_team": "Philadelphia 76ers",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "TD Garden",
+        "venue_town": "Boston, MA",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "-909",
+                "2": "+625",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-909",
+                "2": "+600",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-909",
+                "2": "+640",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:50:05 UTC",
+        "match_date": "2026-04-23 23:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/atlanta-hawks-xAO4gBas/new-york-knicks-WCNO4nbt/#raBLS6Rs",
+        "home_team": "Atlanta Hawks",
+        "away_team": "New York Knicks",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "State Farm Arena",
+        "venue_town": "Atlanta, GA",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "-110",
+                "2": "-110",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-110",
+                "2": "-110",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-106",
+                "2": "-110",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:50:06 UTC",
+        "match_date": "2026-04-22 02:30:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/houston-rockets-Sr9PQALP/los-angeles-lakers-ngegZ8bg/#dMHyPOQ6",
+        "home_team": "Los Angeles Lakers",
+        "away_team": "Houston Rockets",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Crypto.com Arena",
+        "venue_town": "Los Angeles, CA",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "+175",
+                "2": "-208",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "+170",
+                "2": "-208",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "+175",
+                "2": "-208",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:50:07 UTC",
+        "match_date": "2026-04-24 01:30:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/denver-nuggets-CxvW27TI/minnesota-timberwolves-KjBIVQcI/#Yomw7j5L",
+        "home_team": "Minnesota Timberwolves",
+        "away_team": "Denver Nuggets",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Target Center",
+        "venue_town": "Minneapolis, MN",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "-303",
+                "2": "+245",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-303",
+                "2": "+240",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "-294",
+                "2": "+235",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    },
+    {
+        "scraped_date": "2026-04-21 22:50:25 UTC",
+        "match_date": "2017-03-09 17:00:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/houston-rockets-0j2eUlMC/los-angeles-lakers-EXCPojim/#Aonqhgqt",
+        "home_team": "Moravske Budejovice",
+        "away_team": "Decin",
+        "league_name": "2. Liga - Central 2016/2017",
+        "home_score": "4",
+        "away_score": "1",
+        "partial_results": "1:1, 1:0, 2:0",
+        "venue": null,
+        "venue_town": null,
+        "venue_country": "",
+        "home_away_market": []
+    },
+    {
+        "scraped_date": "2026-04-21 22:50:24 UTC",
+        "match_date": "2026-04-24 01:30:00 UTC",
+        "match_link": "https://www.oddsportal.com/basketball/h2h/denver-nuggets-CxvW27TI/minnesota-timberwolves-KjBIVQcI/#UHY81USr",
+        "home_team": "Minnesota Timberwolves",
+        "away_team": "Denver Nuggets",
+        "league_name": "NBA",
+        "home_score": "",
+        "away_score": "",
+        "partial_results": "",
+        "venue": "Target Center",
+        "venue_town": "Minneapolis, MN",
+        "venue_country": "USA",
+        "home_away_market": [
+            {
+                "1": "+110",
+                "2": "-130",
+                "bookmaker_name": "bet365.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "+104",
+                "2": "-128",
+                "bookmaker_name": "BetMGM.us",
+                "period": "FullIncludingOT"
+            },
+            {
+                "1": "+110",
+                "2": "-130",
+                "bookmaker_name": "Fanduel",
+                "period": "FullIncludingOT"
+            }
+        ]
+    }
+]

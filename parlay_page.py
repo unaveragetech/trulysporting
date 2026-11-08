@@ -6,6 +6,8 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import pandas as pd
 import streamlit as st
 
+import parlay_detail as D
+import parlay_pricing as PP
 import parlay_track as T
 import parlays as P
 from sporting_shared import viewer_tz
@@ -62,36 +64,6 @@ def _legs_frame(pz: P.Parlay, tz) -> pd.DataFrame:
         'Data': ' '.join(f"{_KIND_BADGE.get(s.kind, '•')} {s.name}" for s in l.sources)} for l in pz.legs])
 
 
-def _why_dialog(p: P.Parlay, rank: int) -> None:
-    @st.dialog(f'Why parlay #{rank}', width='large')
-    def _show():
-        ex = P.explain_parlay(p)
-        st.markdown(f'### {p.k} legs · {p.p:.1%} chance')
-        st.markdown(f"**How the number is built:** {ex['formula']}")
-        st.markdown(f"**Fair price:** {ex['fair_odds']}")
-        if ex['market']:
-            st.markdown(f"**Sportsbook:** {ex['market']}")
-        st.markdown('**Why these legs were chosen:** from every game still to be played in a league that is running, each leg must '
-                    'clear the minimum chance you set; the search keeps the combinations with the highest joint probability, uses '
-                    'at most one leg per game, and drops near-duplicates so you see real alternatives. Legs that can no longer be '
-                    'bet (game started) are removed.')
-        for l in p.legs:
-            with st.expander(f"{l.pick} · {l.p:.0%} · {l.matchup} ({l.league})", expanded=False):
-                st.dataframe(pd.DataFrame([{'Source': f"{_KIND_BADGE.get(s.kind, '•')} {s.name}",
-                                            'Chance': '—' if s.p is None else f'{s.p:.0%}', 'What it says': s.detail}
-                                           for s in l.sources]), hide_index=True, use_container_width=True)
-                for n in l.notes:
-                    st.caption(n)
-        st.markdown('**Assumptions and limits**')
-        for a in ex['assumptions']:
-            if 'Live legs' not in a:
-                st.markdown(f'- {a}')
-        st.caption('Data: ESPN scoreboards and embedded lines, Kalshi game markets, team results and player box scores stored by '
-                   'this app, and the NFL engine when loaded. Entertainment and analysis only; if you wager, set limits. '
-                   'US help line: 1-800-GAMBLER.')
-    _show()
-
-
 # ── Shared settings and the leg pool ─────────────────────────────────────────
 
 def _settings(label: Callable[[str], str], board: pd.DataFrame) -> Optional[Dict]:
@@ -142,6 +114,10 @@ def _pool(db, worker, season_for, label, cfg: Dict, force: bool = False) -> Tupl
 
 def _save_parlay(p: P.Parlay, name: str, source: str) -> None:
     rec = T.new_record([P.leg_to_dict(l) for l in p.legs], name, p.p, source)
+    rp = PP.price_report(p.legs, p.p)
+    use = rp['best_book']['decimal'] if rp.get('best_book') else (rp['estimate']['decimal'] if rp.get('estimate') else None)
+    rec['price'] = {'book': rp['best_book']['book'] if rp.get('best_book') else None, 'decimal': use, 'estimated': not rp.get('best_book'),
+                    'fair_decimal': rp.get('fair_decimal_market'), 'house_edge': rp.get('house_edge'), 'at': pd.Timestamp.now(tz='UTC').isoformat()}
     T.store_save((st.session_state.get('pl_saved') or []) + [rec])
 
 
@@ -160,14 +136,15 @@ def _top_view(legs: List[P.Leg], info: Dict, cfg: Dict, tz) -> None:
                    'window or reducing the leg count.')
     for i, p in enumerate(pz, 1):
         with st.container(border=True):
-            mk = '' if p.market_decimal is None else f' · sportsbook pays ~{p.market_decimal:.2f}x (edge {p.ev:+.0%})'
+            rep_ = PP.price_report(p.legs, p.p)
             last = max((pd.to_datetime(l.start, utc=True) for l in p.legs))
-            st.markdown(f'**#{i} · {p.k}-leg parlay** · hit chance **{p.p:.1%}** · fair odds {_fair(p.p)}{mk}')
+            st.markdown(f'**#{i} · {p.k}-leg parlay** · hit chance **{p.p:.1%}** · our fair odds {_fair(p.p)}')
+            st.markdown(D.price_line(rep_))
             st.dataframe(_legs_frame(p, tz), hide_index=True, use_container_width=True)
             st.caption(f'Last game starts {_local(last, tz)}; the parlay resolves when the last game ends.')
             b1, b2, _ = st.columns([1, 1, 3])
-            if b1.button('🔍 Why this parlay', key=f'pl_why_{i}'):
-                _why_dialog(p, i)
+            if b1.button('🔍 Full breakdown', key=f'pl_why_{i}'):
+                D.why_dialog(p, i, tz, st.session_state.get('pl_pool', {}).get('at', ''))
             done = tuple(sorted(l.key for l in p.legs)) in saved_sigs
             if b2.button('✅ Tracking' if done else '💾 Track this parlay', key=f'pl_save_{i}', disabled=done):
                 _save_parlay(p, f'Top parlay #{i}', 'top')
@@ -250,9 +227,11 @@ def _builder_view(legs: List[P.Leg], cfg: Dict, tz) -> None:
             st.error('Two legs from the same game are correlated and the chance would be wrong: ' + ', '.join(dupes)
                      + '. Keep one per game.')
         pz = P._parlay(chosen, 'likely')
-        mk = '' if pz.market_decimal is None else f' · sportsbook pays ~{pz.market_decimal:.2f}x (edge {pz.ev:+.0%})'
-        st.markdown(f'Hit chance **{pz.p:.1%}** · fair odds {_fair(pz.p)}{mk}')
+        st.markdown(f'Hit chance **{pz.p:.1%}** · our fair odds {_fair(pz.p)}')
+        st.markdown(D.price_line(PP.price_report(pz.legs, pz.p)))
         st.dataframe(_legs_frame(pz, tz), hide_index=True, use_container_width=True)
+        if st.button('🔍 Full breakdown: price, sources and every fact', key='pl_b_detail'):
+            D.why_dialog(pz, 0, tz, st.session_state.get('pl_pool', {}).get('at', ''))
         plan_rec = {'legs': [P.leg_to_dict(l) for l in chosen]}
         plan = T.resolution_plan(plan_rec, {(l.ep, str(l.game_id)): {'state': 'pre', 'start': l.start} for l in chosen})
         st.markdown(f"**Resolves:** when the last game ends, {T.fmt_when(plan['resolves_at'], tz)}. "
@@ -296,6 +275,12 @@ def _record_card(r: Dict, games: Dict, tz, now) -> Optional[Dict]:
         top[0].markdown(f"**{r['name']}** · {len(r['legs'])} legs · chance when saved **{r['p_saved']:.1%}** · "
                         f"saved {_local(r['created'], tz)}")
         top[0].markdown(f"**{_STATUS.get(g['status'], g['status'])}**")
+        pr_ = r.get('price')
+        if pr_ and pr_.get('decimal'):
+            ret, prof = PP.payout(pr_['decimal'], 10)
+            who = pr_['book'] if pr_.get('book') else 'estimated'
+            top[0].caption(f"Price when saved ({_local(pr_['at'], tz)}): {who} {D.am(pr_['decimal'])}, \\$10 would pay "
+                           f"{D.mdm(ret)} if it hits." + (' (estimate; some legs had no sportsbook price)' if pr_.get('estimated') else ''))
         if top[1].button('🗑 Delete', key=f"pl_del_{r['id']}"):
             T.store_save([x for x in st.session_state['pl_saved'] if x['id'] != r['id']])
             st.rerun()
