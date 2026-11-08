@@ -124,6 +124,9 @@ class Leg:
     sources: List[Source] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     live: bool = False
+    meta: Dict[str, Any] = field(default_factory=dict)  # what is needed to grade the leg from a final box score
+    edge: Optional[float] = None                        # our chance minus the market's, when a market exists
+    bettable: bool = True                               # false once the game has started or no market can take it
 
 
 @dataclass
@@ -207,13 +210,17 @@ def ml_legs(g: Dict, pred: Optional[Dict], blend_w: float, engine_p: Optional[fl
         pp = min(MAX_LEG_P, p)
         if pp <= 0.5:
             continue
+        mkt_side = None if p_mkt is None else (p_mkt if side == 'home' else 1 - p_mkt)
         price = g.get('home_ml') if side == 'home' else g.get('away_ml')
         sg = [Source(s.name, s.kind, s.p if side == 'home' or s.p is None else 1 - s.p, s.detail) for s in srcs]
         legs.append(Leg(
             key=f"{g['id']}:ml:{side}", game_id=g['id'], ep=g['ep'], league=g['league'],
             matchup=f"{g['away_abbr']} @ {g['home_abbr']}", start=g['start'], state=g['state'], kind='ml',
             pick=f'{name} to win', p=pp, price=None if live else (None if price is None or pd.isna(price) else float(price)),
-            sources=sg, notes=[how], live=live))
+            sources=sg, notes=[how], live=live,
+            meta={'kind': 'ml', 'side': side, 'home': g['home'], 'away': g['away'], 'home_abbr': g['home_abbr'],
+                  'away_abbr': g['away_abbr']},
+            edge=None if mkt_side is None else pp - mkt_side, bettable=(not live and g['state'] == 'pre')))
     return legs
 
 
@@ -239,7 +246,10 @@ def spread_total_legs(g: Dict, pred: Optional[Dict], blend_w: float, live_proj: 
                 if min(MAX_LEG_P, p) > 0.5:
                     legs.append(Leg(f"{g['id']}:spread:{side}", g['id'], ep, g['league'], mname, g['start'], g['state'], 'spread',
                                     f'{name} {line:+g}', min(MAX_LEG_P, p), None, [Source(src.name, src.kind, min(MAX_LEG_P, p), src.detail)],
-                                    [how], live))
+                                    [how], live,
+                                    meta={'kind': 'spread', 'side': side, 'line': float(line), 'home': g['home'], 'away': g['away'],
+                                          'home_abbr': g['home_abbr'], 'away_abbr': g['away_abbr']},
+                                    bettable=(not live and g['state'] == 'pre')))
     if total is not None and not pd.isna(total):
         sig_t = SIGMA_TOTAL.get(ep, 12.0)
         if live:
@@ -258,7 +268,10 @@ def spread_total_legs(g: Dict, pred: Optional[Dict], blend_w: float, live_proj: 
                 if min(MAX_LEG_P, p) > 0.5:
                     legs.append(Leg(f"{g['id']}:total:{side}", g['id'], ep, g['league'], mname, g['start'], g['state'], 'total',
                                     f'{word} {total:g} total', min(MAX_LEG_P, p), None,
-                                    [Source(name_src, 'live' if live else 'model', min(MAX_LEG_P, p), how)], [how], live))
+                                    [Source(name_src, 'live' if live else 'model', min(MAX_LEG_P, p), how)], [how], live,
+                                    meta={'kind': 'total', 'side': side, 'line': float(total), 'home': g['home'], 'away': g['away'],
+                                          'home_abbr': g['home_abbr'], 'away_abbr': g['away_abbr']},
+                                    bettable=(not live and g['state'] == 'pre')))
     return legs
 
 
@@ -345,9 +358,53 @@ def player_legs(db: Any, g: Dict, team_abbr: str, team_id: str, opp_factor: floa
                      f'{round((1 - PLAYER_AVAIL) * 100)}% allowance for him not playing a full role')
         cands.append(Leg(f"{g['id']}:pl:{player}:{cat}:{stat}:{thr:g}", g['id'], ep, g['league'], mname, g['start'], g['state'],
                          'player', f'{player} {thr:g}+ {cat_w + " " if cat_w else ""}{word}', p, None, [src],
-                         notes + ['model-only: no sportsbook price in our data']))
+                         notes + ['model-only: no sportsbook price in our data'],
+                         meta={'kind': 'player', 'player': player, 'cat': cat, 'stat': stat, 'thr': float(thr), 'team_abbr': team_abbr,
+                               'home': g.get('home', ''), 'away': g.get('away', ''), 'home_abbr': g['home_abbr'],
+                               'away_abbr': g['away_abbr']},
+                         bettable=(g['state'] == 'pre')))
     cands.sort(key=lambda l: -l.p)
     return cands[:max_per_team]
+
+
+def _start_ts(start: str) -> Optional[pd.Timestamp]:
+    t = pd.to_datetime(start, utc=True, errors='coerce')
+    return None if pd.isna(t) else t
+
+
+def drop_unbettable(legs: List[Leg], now: Optional[pd.Timestamp] = None, lead_minutes: int = 3) -> List[Leg]:
+    """Keep only legs a bettor can still place: not live, not started (or about to), flagged bettable."""
+    now = now if now is not None else pd.Timestamp.now(tz='UTC')
+    keep = []
+    for l in legs:
+        t = _start_ts(l.start)
+        if not l.bettable or l.live or l.state != 'pre' or t is None or t <= now + pd.Timedelta(minutes=lead_minutes):
+            continue
+        keep.append(l)
+    return keep
+
+
+def eligible_leagues(board: pd.DataFrame, hours: int, leagues: List[str], now: Optional[pd.Timestamp] = None) -> Dict[str, int]:
+    """{league: games still to be played inside the window}.  A league with none is out of season (or idle) and is excluded."""
+    if board is None or board.empty:
+        return {}
+    now = now if now is not None else pd.Timestamp.now(tz='UTC')
+    start = pd.to_datetime(board['start'], utc=True, errors='coerce')
+    ok = board[(board['state'] == 'pre') & (start > now) & (start < now + pd.Timedelta(hours=hours))]
+    counts = ok.groupby('ep').size().to_dict()
+    return {e: int(counts[e]) for e in leagues if counts.get(e)}
+
+
+def leg_to_dict(l: Leg) -> Dict:
+    return {'key': l.key, 'game_id': l.game_id, 'ep': l.ep, 'league': l.league, 'matchup': l.matchup, 'start': l.start,
+            'kind': l.kind, 'pick': l.pick, 'p': l.p, 'price': l.price, 'meta': l.meta, 'edge': l.edge,
+            'sources': [vars(s) for s in l.sources], 'notes': l.notes}
+
+
+def leg_from_dict(d: Dict) -> Leg:
+    return Leg(d['key'], d['game_id'], d['ep'], d['league'], d['matchup'], d.get('start', ''), 'pre', d['kind'], d['pick'],
+               float(d['p']), d.get('price'), [Source(**s) for s in d.get('sources', [])], list(d.get('notes', [])), False,
+               meta=d.get('meta', {}), edge=d.get('edge'))
 
 
 # ── Collecting candidate legs ────────────────────────────────────────────────
@@ -357,7 +414,7 @@ CACHE_TTL = 90
 
 
 def collect_legs(db: Any, worker: Any, season_for: Callable[[str], int], label: Callable[[str], str],
-                 eps: List[str], hours_ahead: int = 24, include_live: bool = True, per_league: int = 10,
+                 eps: List[str], hours_ahead: int = 24, include_live: bool = False, per_league: int = 10,
                  types: Tuple[str, ...] = ('ml', 'spread', 'total', 'player'), engine_probs: Optional[Dict] = None,
                  blend: Optional[Dict[str, float]] = None, progress: Optional[Callable[[str], None]] = None,
                  require_market: bool = True) -> Tuple[List[Leg], Dict]:
@@ -365,7 +422,7 @@ def collect_legs(db: Any, worker: Any, season_for: Callable[[str], int], label: 
     key = (tuple(sorted(eps)), hours_ahead, include_live, per_league, tuple(types), bool(engine_probs), require_market)
     hit = _CACHE.get(key)
     if hit and time.time() - hit[0] < CACHE_TTL:
-        return hit[1]
+        return drop_unbettable(hit[1][0]), hit[1][1]
     from concurrent.futures import as_completed
 
     from live import fetch_all_games, fraction_remaining, live_projection
@@ -450,7 +507,9 @@ def collect_legs(db: Any, worker: Any, season_for: Callable[[str], int], label: 
     info['skipped'] = [label(e) for e in eps if e not in info['leagues']]
     res = (legs, info)
     _CACHE[key] = (time.time(), res)
-    return res
+    kept = drop_unbettable(legs)
+    info['dropped_unbettable'] = len(legs) - len(kept)
+    return kept, info
 
 
 # ── Parlay search ────────────────────────────────────────────────────────────
