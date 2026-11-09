@@ -258,6 +258,49 @@ def _fetch_all(records: List[Dict]) -> Dict[Tuple[str, str], Dict]:
         return dict(zip(need, pool.map(lambda k: T.fetch_game(*k), list(need))))
 
 
+_VSTAT = {'ok': '✅ Placeable', 'caution': '⚠️ Verify at the book', 'no': '❌ Not placeable'}
+
+
+def _venue_box(r: Dict, tz) -> None:
+    """Best sportsbook for a watched parlay, from a live re-price and hard validity checks."""
+    import parlay_venues as V
+    res = V.check_record(r)
+    when = _local(res['checked'], tz)
+    if res.get('error'):
+        st.caption(f"🏦 Could not check sportsbooks right now ({res['error']}).")
+        return
+    b = res['best']
+    if b:
+        ret, prof = PP.payout(b['decimal'], 10)
+        line = (f"🏦 **Best book: {b['name']} {D.am(b['decimal'])}** · {_VSTAT[b['status']]} · \\$10 pays {D.mdm(ret)}"
+                + (f" (price covers the {res['n_verified']} verifiable legs)" if res.get('unpriced_legs') else ''))
+        (st.success if b['status'] == 'ok' else st.warning)(line)
+    else:
+        st.error('🏦 No sportsbook can be confirmed for this parlay right now. ' + ('Closed legs: ' + ', '.join(res['closed']) + '. ' if res.get('closed') else '')
+                 + 'See the checks below.')
+    with st.expander(f'Where can this be bought? Checked {when}'):
+        rows = [{'Venue': v['name'], 'Type': 'Sportsbook parlay' if v['type'] == 'sportsbook' else 'Single bets only (not a parlay)',
+                 'Status': _VSTAT[v['status']], 'Price': D.am(v['decimal']) if v['decimal'] else '—',
+                 '$10 pays': D.money(10 * v['decimal']) if v['decimal'] else '—', 'Legs verified': f"{v['covered']}/{v['n']}",
+                 'Data from': ' + '.join(v['via'])} for v in res['venues']]
+        if rows:
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        for v in res['venues']:
+            bad = [t for s_, t in v['reasons'] if s_ == 'fail']
+            warn = [t for s_, t in v['reasons'] if s_ == 'warn']
+            if bad or warn:
+                st.markdown(f"**{v['name']}**\n\n" + '\n'.join([f'- ❌ {t}' for t in bad] + [f'- ⚠️ {t}' for t in warn]))
+            links = [x for x in v.get('links', []) if x]
+            if links and v['status'] != 'no':
+                st.caption('Open at the book: ' + ' · '.join(f'[leg {i + 1}]({u})' for i, u in enumerate(links)))
+        for s_, t in res['general']:
+            st.caption(('❌ ' if s_ == 'fail' else '⚠️ ') + t)
+        st.caption('A venue is called placeable only when it quotes every verifiable leg at the exact saved line, with fresh, sane prices '
+                   '(two sides add to a normal margin, under 30 minutes old), no game has started, and no leg is a same-game or player '
+                   'prop. Books can still reject or reprice a ticket: confirm the price at the book before betting. Exchanges and prediction '
+                   'markets only sell single bets, so they are shown as a separate-bets route, never as the best parlay book.')
+
+
 def _record_card(r: Dict, games: Dict, tz, now) -> Optional[Dict]:
     """Render one saved parlay; returns an updated record if it just settled."""
     res = r.get('result')
@@ -281,6 +324,8 @@ def _record_card(r: Dict, games: Dict, tz, now) -> Optional[Dict]:
             who = pr_['book'] if pr_.get('book') else 'estimated'
             top[0].caption(f"Price when saved ({_local(pr_['at'], tz)}): {who} {D.am(pr_['decimal'])}, \\$10 would pay "
                            f"{D.mdm(ret)} if it hits." + (' (estimate; some legs had no sportsbook price)' if pr_.get('estimated') else ''))
+        if not g.get('settled'):
+            _venue_box(r, tz)
         if top[1].button('🗑 Delete', key=f"pl_del_{r['id']}"):
             T.store_save([x for x in st.session_state['pl_saved'] if x['id'] != r['id']])
             st.rerun()
