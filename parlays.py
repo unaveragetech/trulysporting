@@ -139,6 +139,7 @@ class Parlay:
     market_decimal: Optional[float]
     ev: Optional[float]
     score: float
+    rel: float = 0.0          # reliability 5-95 (see parlay_rel): how far to trust the chance, not a probability
 
     @property
     def k(self) -> int:
@@ -580,24 +581,44 @@ def _parlay(legs: List[Leg], rank: str) -> Parlay:
         for l in legs:
             dec *= decimal_odds(l.price) or 1.0
     ev = None if dec is None else p * dec - 1
-    if rank == 'value' and ev is not None:
+    import parlay_rel
+    rel = parlay_rel.parlay_reliability(legs)
+    if rank == 'reliable':
+        score = rel + p
+    elif rank == 'balanced':
+        score = p * (0.5 + rel / 200)  # a reliable parlay keeps its chance, a flimsy one loses up to half of it
+    elif rank == 'value' and ev is not None:
         score = ev
     elif rank == 'value':  # unpriced legs earn no edge; rank by probability among the priced
         score = -1 + p * 0.001
     else:
         score = p
-    return Parlay(legs, p, 1 / p if p else float('inf'), dec, ev, score)
+    return Parlay(legs, p, 1 / p if p else float('inf'), dec, ev, score, rel)
 
 
 def build_parlays(legs: List[Leg], kmin: int = 4, kmax: int = 7, top: int = 10, min_p: float = 0.6,
                   max_player: int = 2, rank: str = 'likely', width: int = 1500, max_overlap: Optional[int] = None,
-                  options_per_game: int = 3) -> List[Parlay]:
+                  options_per_game: int = 3, min_parlay_p: float = 0.0, max_parlay_p: float = 1.0, min_rel: float = 0.0,
+                  must_include: Tuple[str, ...] = (), require_priced: bool = False) -> List[Parlay]:
     """Best combinations of ``kmin``..``kmax`` legs from different games.
 
     Beam search over games ordered by their best leg; each game offers its few strongest legs.  A greedy pass then keeps
     the top ``top`` parlays, mixing leg counts and rejecting near-duplicates (sharing more than ``max_overlap`` legs).
     """
-    pool = [l for l in legs if l.p >= min_p]
+    import parlay_rel
+    required = [l for l in legs if l.key in set(must_include)]
+    req_games = set()
+    keep_req = []
+    for l in required:  # one required leg per game
+        if l.game_id not in req_games:
+            req_games.add(l.game_id)
+            keep_req.append(l)
+    required = keep_req
+    pool = [l for l in legs if l.p >= min_p and l.game_id not in req_games]
+    if min_rel:
+        pool = [l for l in pool if parlay_rel.leg_score(l) >= min_rel]
+    if require_priced:
+        pool = [l for l in pool if l.price is not None or any(q.get('kind') in ('sportsbook', 'espn') for q in l.quotes)]
     by_game: Dict[str, List[Leg]] = {}
     for l in pool:
         by_game.setdefault(l.game_id, []).append(l)
@@ -608,18 +629,26 @@ def build_parlays(legs: List[Leg], kmin: int = 4, kmax: int = 7, top: int = 10, 
         opts = ls[:options_per_game]
         games.append((gid, opts))
     games.sort(key=lambda t: -t[1][0].p)
-    if len(games) < kmin:
+    if len(games) + len(required) < kmin:
         return []
+    kmax = max(kmax, len(required)) if required else kmax
     # beam[size] = list of (neg_logp, last_game_index, leg_indices tuple, n_player)
     flat: List[Leg] = []
     index: Dict[str, int] = {}
+    for l in required:
+        index[l.key] = len(flat)
+        flat.append(l)
+    base = (sum(-math.log(l.p) for l in required), -1, tuple(index[l.key] for l in required), sum(l.kind == 'player' for l in required))
     for _, opts in games:
         for l in opts:
             index[l.key] = len(flat)
             flat.append(l)
-    beams: Dict[int, List[Tuple[float, int, Tuple[int, ...], int]]] = {0: [(0.0, -1, (), 0)]}
+    r0 = len(required)
+    beams: Dict[int, List[Tuple[float, int, Tuple[int, ...], int]]] = {r0: [base]}
     results: Dict[int, List[Tuple[float, Tuple[int, ...]]]] = {k: [] for k in range(kmin, kmax + 1)}
-    for size in range(1, kmax + 1):
+    if kmin <= r0 <= kmax:
+        results[r0] = [(base[0], base[2])]
+    for size in range(r0 + 1, kmax + 1):
         nxt: List[Tuple[float, int, Tuple[int, ...], int]] = []
         for neg, last, chosen, npl in beams[size - 1]:
             for gi in range(last + 1, len(games)):
@@ -628,14 +657,25 @@ def build_parlays(legs: List[Leg], kmin: int = 4, kmax: int = 7, top: int = 10, 
                     if is_pl and npl >= max_player:
                         continue
                     nxt.append((neg - math.log(l.p), gi, chosen + (index[l.key],), npl + is_pl))
-        nxt = heapq.nsmallest(width, nxt, key=lambda t: t[0])
+        if max_parlay_p < 1.0 or min_parlay_p > 0.0:
+            # a chance band (longshots): keep half the strongest partials and half those heading toward the band's middle
+            mid = math.sqrt(max(min_parlay_p, 1e-4) * max(max_parlay_p, 1e-4))
+            tgt = -math.log(mid) * size / max(1.0, (kmin + kmax) / 2)
+            strong = heapq.nsmallest(width // 2, nxt, key=lambda t: t[0])
+            ids = {id(t) for t in strong}
+            toward = heapq.nsmallest(width - len(strong), [t for t in nxt if id(t) not in ids], key=lambda t: abs(t[0] - tgt))
+            nxt = strong + toward
+        else:
+            nxt = heapq.nsmallest(width, nxt, key=lambda t: t[0])
         beams[size] = nxt
         if size >= kmin:
             results[size] = [(t[0], t[2]) for t in nxt]
     # candidates from every size, scored; then greedy diversified selection
     cands: List[Parlay] = []
     for size, lst in results.items():
-        for neg, chosen in lst[:400]:
+        for neg, chosen in (lst if (max_parlay_p < 1.0 or min_parlay_p > 0.0) else lst[:400]):
+            if not min_parlay_p <= math.exp(-neg) <= max_parlay_p:
+                continue
             cands.append(_parlay([flat[i] for i in chosen], rank))
     cands.sort(key=lambda p: -p.score)
     picked: List[Parlay] = []
