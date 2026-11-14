@@ -160,6 +160,16 @@ a { color: var(--ts-brand-ink); }
 /* Buttons and controls: readable text and a visible edge in every mode */
 .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button, [data-testid^="stBaseButton"], a[data-testid^="stBaseLinkButton"] {
   background: var(--ts-card) !important; color: var(--ts-ink) !important; border: 1px solid var(--ts-edge) !important; font-weight: 600; }
+/* popover triggers, metric tiles: readable in every mode */
+[data-testid="stPopover"] > button, [data-testid="stPopoverButton"], [data-testid="stPopover"] button {
+  background: var(--ts-card) !important; color: var(--ts-ink) !important; border: 1px solid var(--ts-edge) !important; font-weight: 600; }
+[data-testid="stPopover"] button p, [data-testid="stPopover"] button span, [data-testid="stPopover"] button svg { color: var(--ts-ink) !important; fill: var(--ts-ink) !important; }
+[data-testid="stPopoverBody"], [data-testid="stPopoverBody"] * { color: var(--ts-ink); }
+[data-testid="stPopoverBody"] { background: var(--ts-card) !important; border: 1px solid var(--ts-edge) !important; }
+[data-testid="stMetricValue"], [data-testid="stMetricValue"] * { color: var(--ts-ink) !important; }
+[data-testid="stMetricLabel"], [data-testid="stMetricLabel"] * { color: var(--ts-muted) !important; }
+[data-testid="stMetricDelta"], [data-testid="stMetricDelta"] div { color: var(--ts-muted) !important; }
+[data-testid="stMetricDelta"] svg { display: none !important; }
 .stButton > button p, .stDownloadButton > button p, [data-testid^="stBaseButton"] p, a[data-testid^="stBaseLinkButton"] p { color: inherit !important; }
 .stButton > button:hover, .stDownloadButton > button:hover, [data-testid^="stBaseButton"]:hover, a[data-testid^="stBaseLinkButton"]:hover {
   border-color: var(--ts-brand) !important; color: var(--ts-ink) !important; background: var(--ts-card2) !important; }

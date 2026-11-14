@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 
 import parlay_pricing as PP
+import parlay_rel as R
 import parlays as P
 
 KIND_BADGE = {'model': '📐', 'market': '💰', 'live': '🔴', 'player': '👤', 'engine': '🏈'}
@@ -62,6 +63,14 @@ def _facts_table(d: Dict) -> pd.DataFrame:
 
 def render_leg_details(l: P.Leg, tz) -> None:
     """Sources, every price, and the game / team / player facts behind one leg."""
+    rel = R.reliability(l)
+    o = R.leg_odds(l)
+    st.markdown(f"**Reliability: {rel['label']} ({rel['score']:.0f} / 100)** · our fair odds "
+                f"{'—' if o['fair'] is None else format(o['fair'], '+d')}"
+                + (f" · best price {o['best_price']:+d} at {o['best_book']}" if o['best_price'] is not None else ' · no sportsbook price'))
+    st.dataframe(pd.DataFrame([{'Effect': f'{pts:+.0f}', 'Why': text} for pts, text in rel['reasons']] or [{'Effect': '', 'Why': 'no adjustments'}]),
+                 hide_index=True, use_container_width=True)
+    st.caption('Reliability starts at 50 and moves with the evidence. It says how far to trust the chance; it is not a probability.')
     st.markdown('**Where the chance comes from**')
     st.dataframe(pd.DataFrame([{'Source': f"{KIND_BADGE.get(s.kind, '•')} {s.name}", 'Chance': '—' if s.p is None else f'{s.p:.0%}',
                                 'What it says': s.detail} for s in l.sources]), hide_index=True, use_container_width=True)
@@ -190,6 +199,9 @@ METHOD = [
     'The placeable price is the best book that quotes every leg at the same line. Mixing books leg by leg is shown only as a ceiling.',
     'Exchange and prediction-market prices (Kalshi includes an estimated fee of about 0.07 × P × (1 − P) per \\$1 contract) are single-bet '
     'prices and never part of a parlay price.',
+    'Reliability (5-95) is a transparent heuristic: market backing, several books, model and market agreeing, and long player history '
+    'raise it; model-only legs, questionable players, short samples and games far in the future lower it. A parlay scores half its average '
+    'leg and half its weakest leg. "Balanced" ranking is chance multiplied by 0.5 plus half the reliability fraction.',
     'Legs without a sportsbook price (player milestones) are estimated from our chance with a standard 4.5% margin and labelled as estimates.',
     'Expected value compares our chance with the payout; our chance is an estimate from team results, markets and player history.']
 

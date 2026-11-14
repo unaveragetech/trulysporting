@@ -8,6 +8,7 @@ import streamlit as st
 
 import parlay_detail as D
 import parlay_pricing as PP
+import parlay_rel as R
 import parlay_track as T
 import parlays as P
 from sporting_shared import viewer_tz
@@ -57,13 +58,6 @@ def _flags(l: P.Leg) -> str:
     return ' · '.join(f)
 
 
-def _legs_frame(pz: P.Parlay, tz) -> pd.DataFrame:
-    return pd.DataFrame([{
-        'Leg': l.pick, 'Game': l.matchup, 'League': l.league, 'Starts': _local(l.start, tz),
-        'Chance': f'{l.p:.0%}', 'Book price': '—' if l.price is None else f'{l.price:+.0f}',
-        'Data': ' '.join(f"{_KIND_BADGE.get(s.kind, '•')} {s.name}" for s in l.sources)} for l in pz.legs])
-
-
 # ── Shared settings and the leg pool ─────────────────────────────────────────
 
 def _settings(label: Callable[[str], str], board: pd.DataFrame) -> Optional[Dict]:
@@ -71,7 +65,7 @@ def _settings(label: Callable[[str], str], board: pd.DataFrame) -> Optional[Dict
     with st.expander('⚙️ Leagues and filters', expanded=False):
         d1, d2, d3 = st.columns(3)
         hours = d1.slider('Games starting within (hours)', 3, 72, 24, key='pl_hours')
-        min_p = d2.slider('Min chance per leg', 0.50, 0.95, 0.60, 0.01, key='pl_minp')
+        min_p = d2.slider('Min chance per leg', 0.50, 0.95, step=0.01, key='pl_minp')
         per_league = d3.slider('Games per league to consider', 4, 25, 8, key='pl_perleague')
         elig = P.eligible_leagues(board, hours, P.MODEL_LEAGUES)
         eps = st.multiselect('Leagues running now', list(elig), default=list(elig), key='pl_eps',
@@ -121,43 +115,169 @@ def _save_parlay(p: P.Parlay, name: str, source: str) -> None:
     T.store_save((st.session_state.get('pl_saved') or []) + [rec])
 
 
+_RANKS = {'Most likely': 'likely', 'Balanced (chance x reliability)': 'balanced', 'Most reliable': 'reliable',
+          'Best value vs sportsbook': 'value'}
+_RANK_HELP = {'likely': 'Highest hit chance first.', 'balanced': 'Chance, discounted when the evidence behind a leg is thin.',
+              'reliable': 'Legs with the strongest, most agreeing evidence first.', 'value': 'Largest edge over the sportsbook price first.'}
+
+
+def _apply_preset() -> None:
+    """Copy a preset's numbers into the controls (runs as a widget callback, before the controls are drawn)."""
+    ss = st.session_state
+    d = R.PRESETS.get(ss.get('pl_preset'))
+    if not d or 'k' not in d:
+        return
+    ss['pl_k'] = d['k']
+    ss['pl_minp'] = d['min_p']
+    ss['pl_rank'] = next(k for k, v in _RANKS.items() if v == d['rank'])
+    ss['pl_band'] = (int(d['pmin'] * 100), int(d['pmax'] * 100))
+    ss['pl_minrel'] = d['min_rel']
+    ss['pl_priced'] = d['priced']
+    ss['pl_pergame'] = d['per_game']
+    ss['pl_maxpl'] = d['max_pl']
+
+
+def _legs_frame(pz: P.Parlay, tz) -> pd.DataFrame:
+    rows = []
+    for i, l in enumerate(pz.legs, 1):
+        o = R.leg_odds(l)
+        rel = R.reliability(l)
+        rows.append({'#': i, 'Leg': l.pick, 'Game': l.matchup, 'League': l.league, 'Starts': _local(l.start, tz),
+                     'Chance': round(100 * l.p), 'Our odds': '—' if o['fair'] is None else f"{o['fair']:+d}",
+                     'Best price': '—' if o['best_price'] is None else f"{o['best_price']:+d}",
+                     'Book': o['best_book'] or ('no price' if l.kind != 'player' else 'no feed'),
+                     'Reliability': round(rel['score']), 'Edge': None if l.edge is None else round(100 * l.edge, 1),
+                     'Data': ' '.join(f"{_KIND_BADGE.get(s.kind, '•')}" for s in l.sources)})
+    return pd.DataFrame(rows)
+
+
+_LEG_COLS = {'#': st.column_config.NumberColumn('#', width='small'),
+             'Chance': st.column_config.ProgressColumn('Chance', min_value=0, max_value=100, format='%d%%', width='small',
+                                                       help='Our estimated chance this leg wins.'),
+             'Our odds': st.column_config.TextColumn('Our odds', help='The fair American odds for our chance, with no margin.', width='small'),
+             'Best price': st.column_config.TextColumn('Best price', help='Best sportsbook price we found for this exact bet.', width='small'),
+             'Reliability': st.column_config.ProgressColumn('Reliability', min_value=0, max_value=100, format='%d', width='small',
+                                                            help='How far to trust the chance (5-95). Not a probability. Open the breakdown for the reasons.'),
+             'Edge': st.column_config.NumberColumn('Edge', format='%+.1f pts', width='small',
+                                                   help='Our chance minus the market chance. Positive means we like it more than the books do.')}
+
+
+def _show_legs(pz: P.Parlay, tz) -> None:
+    st.dataframe(_legs_frame(pz, tz), hide_index=True, use_container_width=True, column_config=_LEG_COLS)
+
+
+def _headline(p: P.Parlay, rep: Dict) -> None:
+    """The numbers a bettor looks at first, side by side."""
+    bb, est = rep.get('best_book'), rep.get('estimate')
+    use = bb['decimal'] if bb else (est['decimal'] if est else None)
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric('Hit chance', f'{p.p:.1%}', f'fair odds {_fair(p.p)}', delta_color='off')
+    if use:
+        ret, prof = PP.payout(use, 10)
+        c2.metric('\\$10 pays' if not est or bb else '\\$10 pays (est.)', money_plain(ret), (bb['book'] + ' ' + D.am(use)) if bb else f'~{D.am(use)} estimate',
+                  delta_color='off')
+    else:
+        c2.metric('\\$10 pays', '—', 'no price found', delta_color='off')
+    be = rep.get('break_even')
+    c3.metric('Break-even', f'{be:.1%}' if be else '—', 'chance needed to profit', delta_color='off')
+    ev = rep.get('ev_ours')
+    c4.metric('Expected value', '—' if ev is None else f'{ev:+.1%}', 'per dollar staked, if we are right', delta_color='off')
+    c5.metric('Reliability', f'{R.label_for(p.rel)}', f'{p.rel:.0f} / 100', delta_color='off')
+
+
+def money_plain(x: float) -> str:
+    return f'${x:,.2f}'
+
+
 def _top_view(legs: List[P.Leg], info: Dict, cfg: Dict, tz) -> None:
-    with st.expander('⚙️ Parlay options', expanded=False):
+    ss = st.session_state
+    st.markdown('**Strategy**')
+    st.segmented_control('Strategy', list(R.PRESETS), key='pl_preset', on_change=_apply_preset, label_visibility='collapsed')
+    st.caption(R.PRESETS.get(ss.get('pl_preset') or R.DEFAULT_PRESET, {}).get('desc', ''))
+    with st.expander('⚙️ Tune the generator (every control)', expanded=False):
         c1, c2, c3, c4 = st.columns(4)
-        kmin, kmax = c1.slider('Legs per parlay', 2, 10, (4, 7), key='pl_k')
-        top = c2.slider('How many parlays', 3, 20, 10, key='pl_top')
-        rank_lbl = c3.radio('Rank by', ['Most likely', 'Best value vs sportsbook'], key='pl_rank')
-        max_pl = c4.slider('Max player legs', 0, 4, 2, key='pl_maxpl')
-    rank = 'value' if rank_lbl.startswith('Best value') else 'likely'
-    pz = P.build_parlays(legs, kmin, kmax, top, cfg['min_p'], max_pl, rank)
+        kmin, kmax = c1.slider('Legs per parlay', 2, 12, key='pl_k')
+        top = c2.slider('How many parlays', 3, 25, 10, key='pl_top')
+        rank_lbl = c3.selectbox('Rank by', list(_RANKS), key='pl_rank')
+        max_pl = c4.slider('Max player legs', 0, 4, key='pl_maxpl')
+        d1, d2, d3, d4 = st.columns(4)
+        band = d1.slider('Parlay hit chance between (%)', 0, 100, key='pl_band',
+                         help='Keep only parlays whose combined chance falls in this band. Lower bands mean bigger payouts: try 8-35% for longshots.')
+        min_rel = d2.slider('Min reliability per leg', 0, 90, step=5, key='pl_minrel', help='Drops legs whose evidence is thin (0 keeps all).')
+        per_game = d3.slider('Leg options per game', 1, 6, key='pl_pergame', help='How many different legs from one game the search may choose between.')
+        priced = d4.toggle('Only legs a sportsbook prices', key='pl_priced', help='Skips player milestones and anything without a book quote.')
+        st.caption(_RANK_HELP[_RANKS[rank_lbl]] + ' One leg per game per parlay; legs from different games are treated as independent.')
+        labels = {l.key: f'{l.pick} ({l.matchup}, {l.p:.0%})' for l in sorted(legs, key=lambda x: -x.p)}
+        locked = st.multiselect('🔒 Lock these legs into every parlay (optional)', list(labels), format_func=labels.get, key='pl_lock',
+                                help='Every parlay will include these legs. Other legs from the same games are not used.')
+    locked = [k for k in (ss.get('pl_lock') or []) if k in labels]
+    rank = _RANKS[rank_lbl]
+    pz = P.build_parlays(legs, kmin, kmax, top, cfg['min_p'], max_pl, rank, options_per_game=per_game, min_parlay_p=band[0] / 100,
+                         max_parlay_p=band[1] / 100, min_rel=min_rel, must_include=tuple(locked), require_priced=priced)
     saved_sigs = {tuple(sorted(l['key'] for l in r['legs'])) for r in (st.session_state.get('pl_saved') or [])}
     if not pz:
-        st.warning('Not enough legs clear the filters. Try lowering the minimum chance, adding leagues, widening the time '
-                   'window or reducing the leg count.')
+        st.warning('No parlay matches these settings. Try a lower minimum chance, a wider hit-chance band, a lower minimum reliability, '
+                   'more leagues, a longer time window, fewer legs, or unlock a locked leg.')
+        _diagnose(legs, cfg, min_rel, priced, kmin, max_pl)
+    strategy = ss.get('pl_preset') or ''
     for i, p in enumerate(pz, 1):
         with st.container(border=True):
             rep_ = PP.price_report(p.legs, p.p)
             last = max((pd.to_datetime(l.start, utc=True) for l in p.legs))
-            st.markdown(f'**#{i} · {p.k}-leg parlay** · hit chance **{p.p:.1%}** · our fair odds {_fair(p.p)}')
-            st.markdown(D.price_line(rep_))
-            st.dataframe(_legs_frame(p, tz), hide_index=True, use_container_width=True)
-            st.caption(f'Last game starts {_local(last, tz)}; the parlay resolves when the last game ends.')
-            b1, b2, _ = st.columns([1, 1, 3])
+            first = min((pd.to_datetime(l.start, utc=True) for l in p.legs))
+            st.markdown(f"**#{i} · {p.k}-leg parlay** &nbsp; `{strategy}`" if strategy and 'Custom' not in strategy else f'**#{i} · {p.k}-leg parlay**')
+            _headline(p, rep_)
+            wk = R.weakest(p.legs)
+            if p.k >= 3 and wk is not None:
+                st.caption(f"Weakest link: **{wk.pick}** at {wk.p:.0%}. Without it the chance rises to {p.p / wk.p:.1%}. "
+                           f"Games run {_local(first, tz)} to {_local(last, tz)}; it resolves when the last game ends.")
+            if rep_.get('best_book') is None:
+                st.caption(f"💵 {rep_['n_priced']} of {rep_['n']} legs have real sportsbook prices; the price above estimates the rest with a standard margin. "
+                           'Open the full breakdown for each leg.')
+            _show_legs(p, tz)
+            b1, b2, b3 = st.columns([1, 1, 3])
             if b1.button('🔍 Full breakdown', key=f'pl_why_{i}'):
                 D.why_dialog(p, i, tz, st.session_state.get('pl_pool', {}).get('at', ''))
             done = tuple(sorted(l.key for l in p.legs)) in saved_sigs
             if b2.button('✅ Tracking' if done else '💾 Track this parlay', key=f'pl_save_{i}', disabled=done):
                 _save_parlay(p, f'Top parlay #{i}', 'top')
                 st.rerun()
+            rows = R.drop_one(p.legs)
+            if rows:
+                with b3.popover('✂️ What if I drop a leg?'):
+                    st.caption('Each row is this parlay without that leg.')
+                    st.dataframe(pd.DataFrame([{'Without': r_['leg'], 'Chance': f"{r_['chance']:.1%}", 'Gain': f"{100 * r_['gain']:+.1f} pts",
+                                                'Fair odds': f"{r_['fair']:+d}" if r_['fair'] else '—',
+                                                '\\$10 pays': ('~' if r_['estimated'] else '') + (money_plain(10 * r_['decimal']) if r_['decimal'] else '—'),
+                                                'Reliability': f"{r_['reliability']:.0f}"} for r_ in rows]),
+                                 hide_index=True, use_container_width=True)
     if pz:
         cov = ' · '.join(f"{v['label']}: {v['games']} games" for v in info['leagues'].values())
         st.caption(f'Coverage: {cov}. Legs from different games are treated as independent; one leg per game per parlay. '
-                   f"Legs for games that already started are dropped ({info.get('dropped_unbettable', 0)} removed when built).")
+                   f"Legs for games that already started are dropped ({info.get('dropped_unbettable', 0)} removed when built). "
+                   'Reliability is a 5-95 heuristic of how much to trust each chance (market backing, agreeing sources, sample size, news risk); '
+                   'it is not a probability.')
+
+
+def _diagnose(legs: List[P.Leg], cfg: Dict, min_rel: int, priced: bool, kmin: int, max_pl: int) -> None:
+    """Say which limit is binding when no parlay can be built."""
+    ok = [l for l in legs if l.p >= cfg['min_p']]
+    if min_rel:
+        ok = [l for l in ok if R.leg_score(l) >= min_rel]
+    if priced:
+        ok = [l for l in ok if l.price is not None or any(q.get('kind') in ('sportsbook', 'espn') for q in l.quotes)]
+    game_legs = {l.game_id for l in ok if l.kind != 'player'}
+    player_only = {l.game_id for l in ok if l.kind == 'player'} - game_legs
+    reach = len(game_legs) + min(max_pl, len(player_only))
+    st.caption(f"{len(legs)} legs in the pool; {len(ok)} pass your minimum chance{' and the other filters' if (min_rel or priced) else ''}, "
+               f"from {len({l.game_id for l in ok})} games. {len(game_legs)} of those games have a winner, spread or total leg and "
+               f"{len(player_only)} more only a player leg. With at most {max_pl} player leg(s) you can reach {reach} legs; you asked for "
+               f"at least {kmin}." + (' Raise **Max player legs** or lower the minimum chance to get more.' if reach < kmin else ''))
 
 
 # ── View 2: build your own ───────────────────────────────────────────────────
 
-_SORTS = {'Highest chance': ('Chance', False), 'Soonest start': ('_start', True), 'Biggest edge vs market': ('_edge', False),
+_SORTS = {'Highest chance': ('Chance', False), 'Most reliable': ('Reliability', False), 'Best price first': ('_price', False), 'Soonest start': ('_start', True), 'Biggest edge vs market': ('_edge', False),
           'League, then start': ('League', True)}
 
 
@@ -186,11 +306,15 @@ def _builder_view(legs: List[P.Leg], cfg: Dict, tz) -> None:
             continue
         if q and q.lower() not in f'{l.pick} {l.matchup} {l.league}'.lower():
             continue
+        o_ = R.leg_odds(l)
         rows.append({'key': l.key, 'Add': False, 'Leg': l.pick, 'Game': l.matchup, 'League': l.league,
                      'Starts': _local(l.start, tz), '_start': pd.to_datetime(l.start, utc=True, errors='coerce'),
                      'Chance': round(100 * l.p), 'Edge': None if l.edge is None else round(100 * l.edge, 1),
                      '_edge': -1 if l.edge is None else l.edge, 'Book price': '—' if l.price is None else f'{l.price:+.0f}',
-                     'Flags': _flags(l)})
+                     'Our odds': '—' if o_['fair'] is None else f"{o_['fair']:+d}",
+                     'Best price': '—' if o_['best_price'] is None else f"{o_['best_price']:+d}", 'Book': o_['best_book'] or '',
+                     '_price': -9999 if o_['best_price'] is None else o_['best_price'],
+                     'Reliability': round(R.reliability(l)['score']), 'Flags': _flags(l), 'gid': l.game_id})
     if not rows:
         st.info('No legs match these filters.')
         return
@@ -198,13 +322,25 @@ def _builder_view(legs: List[P.Leg], cfg: Dict, tz) -> None:
     col, asc = _SORTS[sort_lbl]
     df = df.sort_values(col, ascending=asc, kind='stable').reset_index(drop=True)
     sel: Set[str] = set(st.session_state.get('pl_sel', set()))
+    q1, q2, q3 = st.columns([2, 2, 3])
+    n_stack = q1.number_input('Quick stack size', 2, 12, 5, key='pl_stackn', help='How many legs the stack buttons add.')
+    if q2.button('🔒 Stack the most likely legs', key='pl_stack_likely', help='Adds the N highest-chance legs, one per game, from the legs shown.'):
+        st.session_state['pl_sel'] = set(df.sort_values('Chance', ascending=False).drop_duplicates('gid').head(int(n_stack))['key'])
+        st.rerun()
+    if q3.button('🛡 Stack the most reliable legs (chance 70%+)', key='pl_stack_rel', help='Adds the N most reliable legs that clear 70%, one per game.'):
+        st.session_state['pl_sel'] = set(df[df['Chance'] >= 70].sort_values(['Reliability', 'Chance'], ascending=False)
+                                         .drop_duplicates('gid').head(int(n_stack))['key'])
+        st.rerun()
     df['Add'] = df['key'].isin(sel)
-    shown = df.set_index('key')[['Add', 'Leg', 'Game', 'League', 'Starts', 'Chance', 'Edge', 'Book price', 'Flags']]
+    shown = df.set_index('key')[['Add', 'Leg', 'Game', 'League', 'Starts', 'Chance', 'Our odds', 'Best price', 'Book', 'Reliability', 'Edge', 'Flags']]
     edited = st.data_editor(
         shown, hide_index=True, use_container_width=True, height=420, key=f'pl_editor_{abs(hash((sort_lbl, tuple(kinds), tuple(flag), q)))}',
         disabled=[c for c in shown.columns if c != 'Add'],
         column_config={'Add': st.column_config.CheckboxColumn('Add', width='small'),
                        'Chance': st.column_config.NumberColumn('Chance %', format='%d%%'),
+                       'Our odds': st.column_config.TextColumn('Our odds', help='Fair American odds for our chance, no margin.'),
+                       'Best price': st.column_config.TextColumn('Best price', help='Best sportsbook price found for this exact bet.'),
+                       'Reliability': st.column_config.NumberColumn('Reliability', format='%d', help='How far to trust the chance, 5-95. Not a probability.'),
                        'Edge': st.column_config.NumberColumn('Edge vs market', format='%+.1f pts')})
     visible = set(shown.index)
     sel = (sel - visible) | set(edited.index[edited['Add']])
@@ -227,9 +363,8 @@ def _builder_view(legs: List[P.Leg], cfg: Dict, tz) -> None:
             st.error('Two legs from the same game are correlated and the chance would be wrong: ' + ', '.join(dupes)
                      + '. Keep one per game.')
         pz = P._parlay(chosen, 'likely')
-        st.markdown(f'Hit chance **{pz.p:.1%}** · our fair odds {_fair(pz.p)}')
-        st.markdown(D.price_line(PP.price_report(pz.legs, pz.p)))
-        st.dataframe(_legs_frame(pz, tz), hide_index=True, use_container_width=True)
+        _headline(pz, PP.price_report(pz.legs, pz.p))
+        _show_legs(pz, tz)
         if st.button('🔍 Full breakdown: price, sources and every fact', key='pl_b_detail'):
             D.why_dialog(pz, 0, tz, st.session_state.get('pl_pool', {}).get('at', ''))
         plan_rec = {'legs': [P.leg_to_dict(l) for l in chosen]}
@@ -394,6 +529,9 @@ def _my_view(saved: Optional[List[Dict]], tz) -> None:
 def render_parlay_page(db: Any, worker: Any, season_for: Callable[[str], int], label: Callable[[str], str]) -> None:
     from live import fetch_all_games
     tz = viewer_tz()
+    if 'pl_k' not in st.session_state:  # first visit: start from the default strategy
+        st.session_state.setdefault('pl_preset', R.DEFAULT_PRESET)
+        _apply_preset()
     st.markdown('## 🎰 Parlay Lab')
     st.caption('Top parlays and your own, from games that can still be bet on, in leagues that are running. Every leg shows its data '
                'sources, and saved parlays are followed to the final result. Estimates from public data, for entertainment and '
