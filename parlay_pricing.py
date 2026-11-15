@@ -60,8 +60,8 @@ def payout(decimal: float, stake: float) -> Tuple[float, float]:
 
 
 def quote(source: str, kind: str, price: float, opp: Optional[float], line: Optional[float], via: str, link: Optional[str] = None,
-          note: str = '', exact: bool = True, ts: Optional[str] = None) -> Dict[str, Any]:
-    return {'source': source, 'kind': kind, 'price': float(price), 'opp': None if opp is None else float(opp), 'line': line,
+          note: str = '', exact: bool = True, ts: Optional[str] = None, sid: Optional[str] = None) -> Dict[str, Any]:
+    return {'source': source, 'sid': sid, 'kind': kind, 'price': float(price), 'opp': None if opp is None else float(opp), 'line': line,
             'via': via, 'link': link, 'note': note, 'exact': exact, 'ts': ts, 'decimal': to_decimal(price)}
 
 
@@ -97,7 +97,13 @@ def espn_quotes(g: Dict, kind: str, side: str) -> List[Dict]:
         return []
     if mine is None:
         return []
-    return [quote(book, 'espn', mine, opp, line, 'ESPN', note='price shown on ESPN at last check')]
+    key = {'ml': f'dk_{side}_ml', 'spread': f'dk_{side}_spread', 'total': f'dk_{side}'}[kind]
+    sid = g.get(key) if 'draftkings' in book.lower() else None
+    if sid is not None and not isinstance(sid, str):
+        sid = None  # NaN from a DataFrame
+    link = None if not sid else 'https://sportsbook.draftkings.com/?outcomes=' + sid
+    return [quote(book, 'espn', mine, opp, line, 'ESPN', link=link, note='price shown on ESPN at last check', sid=sid,
+                  ts=pd.Timestamp.now(tz='UTC').isoformat())]
 
 
 def kalshi_quote(g: Dict, side: str) -> List[Dict]:

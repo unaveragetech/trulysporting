@@ -160,6 +160,8 @@ a { color: var(--ts-brand-ink); }
 /* Buttons and controls: readable text and a visible edge in every mode */
 .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button, [data-testid^="stBaseButton"], a[data-testid^="stBaseLinkButton"] {
   background: var(--ts-card) !important; color: var(--ts-ink) !important; border: 1px solid var(--ts-edge) !important; font-weight: 600; }
+/* alert boxes: dark text on the pale fills in light mode, light text on the dark fills in dark mode */
+[data-testid="stAlert"] p, [data-testid="stAlert"] li, [data-testid="stAlert"] span, [data-testid="stAlertContainer"] p { color: var(--ts-ink) !important; }
 /* popover triggers, metric tiles: readable in every mode */
 [data-testid="stPopover"] > button, [data-testid="stPopoverButton"], [data-testid="stPopover"] button {
   background: var(--ts-card) !important; color: var(--ts-ink) !important; border: 1px solid var(--ts-edge) !important; font-weight: 600; }

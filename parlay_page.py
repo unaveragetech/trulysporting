@@ -9,6 +9,7 @@ import streamlit as st
 import parlay_detail as D
 import parlay_pricing as PP
 import parlay_rel as R
+import parlay_slip as S
 import parlay_track as T
 import parlays as P
 from sporting_shared import viewer_tz
@@ -235,13 +236,17 @@ def _top_view(legs: List[P.Leg], info: Dict, cfg: Dict, tz) -> None:
                 st.caption(f"💵 {rep_['n_priced']} of {rep_['n']} legs have real sportsbook prices; the price above estimates the rest with a standard margin. "
                            'Open the full breakdown for each leg.')
             _show_legs(p, tz)
-            b1, b2, b3 = st.columns([1, 1, 3])
+            b1, b2, b4, b3 = st.columns([1, 1, 1, 1.4])
             if b1.button('🔍 Full breakdown', key=f'pl_why_{i}'):
                 D.why_dialog(p, i, tz, st.session_state.get('pl_pool', {}).get('at', ''))
             done = tuple(sorted(l.key for l in p.legs)) in saved_sigs
-            if b2.button('✅ Tracking' if done else '💾 Track this parlay', key=f'pl_save_{i}', disabled=done):
+            if b2.button('✅ Watching' if done else '👁 Watch this parlay', key=f'pl_save_{i}', disabled=done,
+                         help='Saves it to My parlays and follows it to the final result.'):
                 _save_parlay(p, f'Top parlay #{i}', 'top')
                 st.rerun()
+            if b4.button('🎟 Open at sportsbook', key=f'pl_slip_{i}', type='primary',
+                         help='Checks live prices, then opens the best book with the legs filled in where the book allows it.'):
+                S.slip_dialog(p.legs, 'top:' + '|'.join(sorted(l.key for l in p.legs)))
             rows = R.drop_one(p.legs)
             if rows:
                 with b3.popover('✂️ What if I drop a leg?'):
@@ -365,15 +370,18 @@ def _builder_view(legs: List[P.Leg], cfg: Dict, tz) -> None:
         pz = P._parlay(chosen, 'likely')
         _headline(pz, PP.price_report(pz.legs, pz.p))
         _show_legs(pz, tz)
-        if st.button('🔍 Full breakdown: price, sources and every fact', key='pl_b_detail'):
+        bb1, bb2, _bb3 = st.columns([1.4, 1, 2])
+        if bb1.button('🔍 Full breakdown: price, sources and every fact', key='pl_b_detail'):
             D.why_dialog(pz, 0, tz, st.session_state.get('pl_pool', {}).get('at', ''))
+        if bb2.button('🎟 Open at sportsbook', key='pl_b_slip', type='primary', disabled=bool(dupes)):
+            S.slip_dialog(chosen, 'top:' + '|'.join(sorted(l.key for l in chosen)))
         plan_rec = {'legs': [P.leg_to_dict(l) for l in chosen]}
         plan = T.resolution_plan(plan_rec, {(l.ep, str(l.game_id)): {'state': 'pre', 'start': l.start} for l in chosen})
         st.markdown(f"**Resolves:** when the last game ends, {T.fmt_when(plan['resolves_at'], tz)}. "
                     f"First game can end {T.fmt_when(plan['first_end'], tz)}.")
         c1, c2, c3 = st.columns([3, 1, 1])
         name = c1.text_input('Name (optional)', key='pl_name', placeholder='My Saturday parlay')
-        if c2.button('💾 Save to My parlays', type='primary', disabled=bool(dupes), key='pl_savecustom'):
+        if c2.button('👁 Watch this parlay', disabled=bool(dupes), key='pl_savecustom', help='Saves it to My parlays and follows it to the final result.'):
             _save_parlay(pz, name, 'custom')
             st.session_state['pl_sel'] = set()
             st.session_state['pl_flash'] = 'Saved. Open **My parlays** to follow it to the final result.'
@@ -413,6 +421,9 @@ def _venue_box(r: Dict, tz) -> None:
     else:
         st.error('🏦 No sportsbook can be confirmed for this parlay right now. ' + ('Closed legs: ' + ', '.join(res['closed']) + '. ' if res.get('closed') else '')
                  + 'See the checks below.')
+    if res.get('slip') and res['slip']['ok']:
+        with st.expander('🎟 Open at a sportsbook (legs filled in where the book allows it)'):
+            S.render_slip(res, 'rec' + r['id'])
     with st.expander(f'Where can this be bought? Checked {when}'):
         rows = [{'Venue': v['name'], 'Type': 'Sportsbook parlay' if v['type'] == 'sportsbook' else 'Single bets only (not a parlay)',
                  'Status': _VSTAT[v['status']], 'Price': D.am(v['decimal']) if v['decimal'] else '—',
@@ -494,7 +505,7 @@ def _my_view(saved: Optional[List[Dict]], tz) -> None:
         st.info('Loading your saved parlays…')
         return
     if not saved:
-        st.info('Nothing saved yet. Press **Track this parlay** on a top parlay, or build your own, and it will be followed to '
+        st.info('Nothing saved yet. Press **Watch this parlay** on a top parlay, or build your own, and it will be followed to '
                 'the final result here. Parlays live in this browser only.')
         return
     pending = any(not (r.get('result') or {}).get('settled') for r in saved)

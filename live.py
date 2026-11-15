@@ -287,6 +287,21 @@ ALL_ESPN_LEAGUES = [
 ]
 
 
+def dk_outcome_id(href: Optional[str]) -> Optional[str]:
+    """DraftKings' selection id from the betslip link ESPN embeds (it carries the id in an ``outcomes`` parameter)."""
+    from urllib.parse import parse_qs, urlparse
+    if not href or 'draftkings.com' not in href:
+        return None
+    try:
+        q = parse_qs(urlparse(href).query)
+        inner = q.get('preurl', [href])[0]
+        ids = parse_qs(urlparse(inner).query).get('outcomes') or parse_qs(urlparse(href).query).get('outcomes')
+        sid = (ids or [''])[0].strip()
+        return sid if re.fullmatch(r'[0-9A-Za-z_.\-]{4,60}', sid) else None
+    except Exception:
+        return None
+
+
 def event_row(ep: str, ev: Dict) -> Dict:
     """One flat row per ESPN event (any state), with the odds ESPN embeds."""
     comp = (ev.get('competitions') or [{}])[0]
@@ -307,6 +322,11 @@ def event_row(ep: str, ev: Dict) -> Dict:
     ml = odds.get('moneyline') or {}
     ps = odds.get('pointSpread') or {}
     tt = odds.get('total') or {}
+    is_dk = 'draftkings' in str((odds.get('provider') or {}).get('name', '')).lower()
+
+    def dk(d, side):
+        blk = (d.get(side) or {})
+        return dk_outcome_id(((blk.get('close') or blk.get('open') or {}).get('link') or {}).get('href')) if is_dk else None
 
     def close(side, d, k='odds'):
         blk = d.get(side) or {}
@@ -327,6 +347,8 @@ def event_row(ep: str, ev: Dict) -> Dict:
         'spread': close('home', ps, 'line') if ps else num(odds.get('spread')), 'total': num(odds.get('overUnder')),
         'home_spread_price': close('home', ps), 'away_spread_price': close('away', ps),
         'over_price': close('over', tt), 'under_price': close('under', tt),
+        'dk_home_ml': dk(ml, 'home'), 'dk_away_ml': dk(ml, 'away'), 'dk_home_spread': dk(ps, 'home'), 'dk_away_spread': dk(ps, 'away'),
+        'dk_over': dk(tt, 'over'), 'dk_under': dk(tt, 'under'),
     }
 
 

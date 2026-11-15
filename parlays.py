@@ -596,6 +596,17 @@ def _parlay(legs: List[Leg], rank: str) -> Parlay:
     return Parlay(legs, p, 1 / p if p else float('inf'), dec, ev, score, rel)
 
 
+MIN_BOOK_DECIMAL = 1.04  # about -2500: books will not take a leg priced shorter than this in a parlay
+
+
+def too_short(l: Leg) -> bool:
+    """True when every book price we have for this leg is shorter than books accept (a near-certain favourite)."""
+    ds = [q['decimal'] for q in l.quotes if q.get('kind') in ('sportsbook', 'espn') and q.get('exact', True)]
+    if not ds and l.price is not None:
+        ds = [decimal_odds(l.price) or 9.9]
+    return bool(ds) and max(ds) < MIN_BOOK_DECIMAL
+
+
 def build_parlays(legs: List[Leg], kmin: int = 4, kmax: int = 7, top: int = 10, min_p: float = 0.6,
                   max_player: int = 2, rank: str = 'likely', width: int = 1500, max_overlap: Optional[int] = None,
                   options_per_game: int = 3, min_parlay_p: float = 0.0, max_parlay_p: float = 1.0, min_rel: float = 0.0,
@@ -614,7 +625,7 @@ def build_parlays(legs: List[Leg], kmin: int = 4, kmax: int = 7, top: int = 10, 
             req_games.add(l.game_id)
             keep_req.append(l)
     required = keep_req
-    pool = [l for l in legs if l.p >= min_p and l.game_id not in req_games]
+    pool = [l for l in legs if l.p >= min_p and l.game_id not in req_games and not too_short(l)]
     if min_rel:
         pool = [l for l in pool if parlay_rel.leg_score(l) >= min_rel]
     if require_priced:
