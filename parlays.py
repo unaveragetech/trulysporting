@@ -139,6 +139,7 @@ class Parlay:
     market_decimal: Optional[float]
     ev: Optional[float]
     score: float
+    book: Optional[str] = None  # set when every leg is quoted at this one sportsbook (a parlay it can take)
     rel: float = 0.0          # reliability 5-95 (see parlay_rel): how far to trust the chance, not a probability
 
     @property
@@ -593,7 +594,12 @@ def _parlay(legs: List[Leg], rank: str) -> Parlay:
         score = -1 + p * 0.001
     else:
         score = p
-    return Parlay(legs, p, 1 / p if p else float('inf'), dec, ev, score, rel)
+    return Parlay(legs, p, 1 / p if p else float('inf'), dec, ev, score, rel=rel)
+
+
+def book_names(l: Leg) -> set:
+    """Sportsbooks that quote this exact bet (a price from ESPN's embedded book or Unabated, same line)."""
+    return {q['source'] for q in l.quotes if q.get('kind') in ('sportsbook', 'espn') and q.get('exact', True)}
 
 
 MIN_BOOK_DECIMAL = 1.04  # about -2500: books will not take a leg priced shorter than this in a parlay
@@ -710,6 +716,35 @@ def build_parlays(legs: List[Leg], kmin: int = 4, kmax: int = 7, top: int = 10, 
             break
     picked.sort(key=lambda p: -p.score)
     return picked
+
+
+def build_placeable(legs: List[Leg], kmin: int = 4, kmax: int = 7, top: int = 10, min_p: float = 0.6, max_player: int = 0,
+                    rank: str = 'likely', **kw) -> List[Parlay]:
+    """Parlays one sportsbook can actually take: every leg is quoted, at the exact line, by the same book.
+
+    Runs the normal search once per book on only the legs that book quotes (player milestones have no book price, so they
+    never qualify), then merges, so the page never offers a parlay no book can price.
+    """
+    cover: Dict[str, set] = {}
+    for l in legs:
+        if l.kind == 'player':
+            continue
+        for b in book_names(l):
+            cover.setdefault(b, set()).add(l.game_id)
+    books = sorted(cover, key=lambda b: -len(cover[b]))[:4]
+    merged: Dict[frozenset, Parlay] = {}
+    for b in books:
+        if len(cover[b]) < kmin:
+            continue
+        sub = [l for l in legs if l.kind != 'player' and b in book_names(l)]
+        for p in build_parlays(sub, kmin, kmax, top, min_p, 0, rank, **kw):
+            p.book = b
+            k = frozenset(l.key for l in p.legs)
+            if k not in merged or p.score > merged[k].score:
+                merged[k] = p
+    must = set(kw.get('must_include', ()))
+    out = sorted((p for p in merged.values() if must <= {l.key for l in p.legs}), key=lambda p: -p.score)
+    return out[:top]
 
 
 # ── Explanations ─────────────────────────────────────────────────────────────

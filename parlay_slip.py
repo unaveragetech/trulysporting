@@ -21,6 +21,30 @@ def _links(book: Dict[str, Any]) -> None:
             st.markdown(f"- Leg {i}: **{r['pick']}**{px}: no link for this leg, search it at {book['name']}")
 
 
+def _coverage(res: Dict[str, Any]) -> None:
+    """Which books quote which leg: shows at a glance why nothing can be opened."""
+    import pandas as pd
+    legs = res.get('legs') or []
+    if not legs:
+        return
+    names = sorted({q['source'] for l in legs for q in l.quotes if q.get('kind') in ('sportsbook', 'espn', 'exchange')})
+    rows = []
+    for l in legs:
+        row = {'Leg': l.pick}
+        for n in names:
+            qs = [q for q in l.quotes if q['source'] == n]
+            row[n] = '—' if not qs else ('✓' if any(q.get('exact', True) for q in qs) else 'other line')
+        if l.kind == 'player':
+            row['Note'] = 'player prop: no price feed'
+        elif l.info.get('gone'):
+            row['Note'] = 'game not on the board'
+        elif not any(q.get('kind') in ('sportsbook', 'espn') for q in l.quotes):
+            row['Note'] = 'no sportsbook quote found for this game'
+        rows.append(row)
+    st.caption('Who quotes each leg right now (✓ = quoted at the exact line):')
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+
 def render_slip(res: Dict[str, Any], key: str) -> None:
     plan = res.get('slip')
     if res.get('error') or not plan:
@@ -29,6 +53,7 @@ def render_slip(res: Dict[str, Any], key: str) -> None:
     if not plan['ok']:
         st.error('No sportsbook can be confirmed for this parlay right now, so there is nothing safe to open.'
                  + (' Closed legs: ' + ', '.join(plan['closed']) + '.' if plan['closed'] else ''))
+        _coverage(res)
         for v in res.get('venues', []):
             bad = [t for s, t in v['reasons'] if s == 'fail']
             if bad and v['type'] == 'sportsbook':
