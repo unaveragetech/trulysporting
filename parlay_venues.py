@@ -35,7 +35,7 @@ def check_quote(q: Dict, now: pd.Timestamp) -> List[Tuple[str, str]]:
         out.append(('fail', f"different line ({q.get('line')}); not the same bet"))
     dec = q.get('decimal') or 0
     if dec < 1.01 or dec > 1 + MAX_AMERICAN / 100:
-        out.append(('fail', 'price is outside any sane range (placeholder or error)'))
+        out.append(('fail', 'price is too short to bet in a parlay (about -2500 or shorter) or is a placeholder'))
     if abs(q.get('price') or 0) >= 10000 and q.get('opp') is not None and abs(q['opp']) >= 10000:
         out.append(('fail', 'placeholder price (+/-10000 on both sides) is not a real line'))
     elif q.get('price') is not None and q['price'] <= -1000:
@@ -235,21 +235,37 @@ _CACHE_LOCK = threading.Lock()
 TTL = 90
 
 
-def check_record(rec: Dict, force: bool = False) -> Dict:
-    """Live venue check for one saved parlay record (cached 90 seconds, so many open parlays share one round of requests)."""
-    import parlays as P
-    sig = rec['id'] + str(len(rec['legs']))
+def check_legs(legs: List[Any], key: str, force: bool = False, stake: float = 10.0) -> Dict:
+    """Live re-price a set of legs (copies, so the caller's legs are untouched), validate every venue, and build the betslip plan.
+
+    Cached 90 seconds per ``key``, so opening several parlays shares one round of requests.
+    """
+    import dataclasses
+
+    import betslip
     with _CACHE_LOCK:
-        hit = _CACHE.get(sig)
+        hit = _CACHE.get(key)
         if hit and not force and time.time() - hit[0] < TTL:
-            return hit[1]
+            res = hit[1]
+            if res.get('slip') and res['slip']['stake'] != stake and res.get('legs'):
+                res['slip'] = betslip.build(res['legs'], res, stake)
+            return res
     try:
-        legs = refresh_legs([P.leg_from_dict(d) for d in rec['legs']])
-        res = evaluate(legs)
+        copies = [dataclasses.replace(l, quotes=list(l.quotes), info=dict(l.info)) for l in legs]
+        refresh_legs(copies)
+        res = evaluate(copies)
+        res['legs'] = copies
+        res['slip'] = betslip.build(copies, res, stake)
         res['error'] = None
     except Exception as e:  # a feed failing must never break the page
         res = {'best': None, 'venues': [], 'general': [], 'checked': pd.Timestamp.now(tz='UTC').isoformat(), 'verdict': 'no',
-               'error': f'{type(e).__name__}: {e}'}
+               'error': f'{type(e).__name__}: {e}', 'legs': [], 'slip': None}
     with _CACHE_LOCK:
-        _CACHE[sig] = (time.time(), res)
+        _CACHE[key] = (time.time(), res)
     return res
+
+
+def check_record(rec: Dict, force: bool = False) -> Dict:
+    """Live venue check for one saved parlay record."""
+    import parlays as P
+    return check_legs([P.leg_from_dict(d) for d in rec['legs']], rec['id'] + str(len(rec['legs'])), force)
