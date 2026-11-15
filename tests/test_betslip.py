@@ -94,3 +94,33 @@ def test_generator_skips_legs_priced_too_short_for_a_parlay():
     out = P.build_parlays([short] + ok, 2, 4, 5, 0.7)
     assert out and all("k1" not in [l.key for l in x.legs] for x in out)
     assert P.too_short(short) and not P.too_short(ok[0])
+
+
+def test_build_placeable_only_returns_parlays_one_book_quotes_in_full():
+    def L(i, books, p=0.8):
+        qs = [PP.quote(b, "sportsbook", -200, 170, None, "Unabated", ts=TS) for b in books]
+        x = leg(i, qs)
+        x.p = p
+        return x
+    legs = [L(1, ["DraftKings", "FanDuel"]), L(2, ["DraftKings"]), L(3, ["DraftKings", "FanDuel"]), L(4, ["FanDuel"]), L(5, []),
+            L(6, ["DraftKings", "FanDuel"])]
+    out = P.build_placeable(legs, 3, 4, 10, 0.5)
+    assert out
+    for p in out:
+        assert p.book in ("DraftKings", "FanDuel")
+        assert all(p.book in P.book_names(l) for l in p.legs)          # every leg quoted at that one book
+        assert all(l.key != "k5" for l in p.legs)                      # a leg no book quotes is never offered
+    pl = P.Leg("kp", "g9", "basketball/nba", "NBA", "A @ B", START, "pre", "player", "Ace 20+ points", 0.95, meta={"kind": "player"})
+    assert all(l.kind != "player" for p in P.build_placeable(legs + [pl], 3, 4, 10, 0.5) for l in p.legs)
+    forced = P.build_placeable(legs, 3, 4, 10, 0.5, must_include=("k5",))
+    assert forced == []                                                # a locked leg no book quotes cannot be placed
+
+
+def test_parlay_keeps_reliability_and_book_in_separate_fields():
+    legs = [leg(i, [dk(-200, 170, f"0ML{i}_1")]) for i in range(1, 4)]
+    for l in legs:
+        l.p = 0.8
+    p = P._parlay(legs, "balanced")
+    assert p.book is None and p.rel > 0
+    out = P.build_placeable(legs, 2, 3, 5, 0.5)
+    assert out and all(isinstance(x.book, str) and x.rel > 0 for x in out)
