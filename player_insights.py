@@ -10,6 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+import nestsafe
 
 GAMELOG = "https://site.web.api.espn.com/apis/common/v3/sports/{ep}/athletes/{pid}/gamelog"
 SPLITS = "https://site.web.api.espn.com/apis/common/v3/sports/{ep}/athletes/{pid}/splits"
@@ -242,14 +243,14 @@ def render_player_insights(ep: str, pid: str, season: int, season_label, player_
     st.caption(f"Best {_label(stats[0]).lower()} game: {best[stats[0]]:g} "
                f"{'vs' if best['home'] else '@'} {best['opp']} on {best['date']} ({best['result']} {best['score']}).")
 
-    with st.expander('📋 Full game log'):
+    with nestsafe.expander('📋 Full game log'):
         show = df.drop(columns=['event_id']).rename(columns=lambda c: _label(c) if c[0].islower()
                                                     and c not in ('date', 'opp', 'home', 'result',
                                                                   'score', 'type') else c)
         st.dataframe(show.iloc[::-1], hide_index=True, use_container_width=True)
     sp = fetch_splits(ep, pid, season)
     if not sp.empty:
-        with st.expander('🧮 ESPN official splits (month, opponent, situation…)'):
+        with nestsafe.expander('🧮 ESPN official splits (month, opponent, situation…)'):
             for grp, sub in sp.groupby('Group', sort=False):
                 st.caption(grp)
                 st.dataframe(sub.drop(columns='Group'), hide_index=True, use_container_width=True)

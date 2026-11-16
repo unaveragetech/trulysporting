@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
+import nestsafe
 
 import parlay_pricing as PP
 
@@ -120,7 +121,7 @@ def render(res: Dict[str, Any]) -> None:
     st.dataframe(pd.DataFrame(grid), hide_index=True, use_container_width=True)
     for r in m['rows']:
         got = list(r['cells'].items())
-        with st.expander(f"{r['pick']}: {sum(1 for _, c in got if c['exact'])} places"):
+        with nestsafe.expander(f"{r['pick']}: {sum(1 for _, c in got if c['exact'])} places"):
             leg_header(r['leg'])
             for b, c in sorted(got, key=lambda t: -t[1]['decimal']):
                 a, bcol = st.columns([3, 2])

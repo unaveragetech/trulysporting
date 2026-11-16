@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import pandas as pd
 import requests
 import streamlit as st
+import nestsafe
 
 from fanduel_odds import american_to_prob
 from matchups import (_HFA, _SIGMA, blended_prob, build_slate, predict,
@@ -580,7 +581,7 @@ def render_best_bets(db: Any, worker: Any, ep: str, season: int, label: Callable
                    'a recommendation. Below are the biggest places the model disagrees with '
                    'the market — useful for research, not for betting.')
 
-    with st.expander('🔍 Model leans — every market, biggest disagreements first',
+    with nestsafe.expander('🔍 Model leans — every market, biggest disagreements first',
                      expanded=not rule):
         leans = bets.dropna(subset=['Edge']).sort_values('Edge', ascending=False)
         leans = leans.drop_duplicates(['Game', 'Bet']).head(25)

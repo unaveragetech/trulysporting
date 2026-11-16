@@ -10,6 +10,7 @@ import pandas as pd
 import plotly.express as px
 import requests
 import streamlit as st
+import nestsafe
 
 from fanduel_odds import (MARKET_LABELS, ODDS_SPORT_MAP, _api_key, _fmt_price,
                           american_to_prob, events_to_df, fetch_fanduel_odds,
@@ -222,7 +223,7 @@ def render_line_explainer(games: pd.DataFrame) -> None:
         st.caption('No lines posted for this game yet.')
     for t in pts:
         st.markdown(f'- {t}')
-    with st.expander('Glossary'):
+    with nestsafe.expander('Glossary'):
         st.markdown(
             "- **No-vig %**: the market's estimated chance after removing the book's cut.\n"
             "- **Edge**: a model's chance minus the market's chance. Only meaningful if the "

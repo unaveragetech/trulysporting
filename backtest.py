@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import nestsafe
 
 from matchups import _HFA, _SIGMA, predict
 
@@ -418,7 +419,7 @@ def render_backtest_page(db: Any, ep: str, label, bounds) -> None:
                 t[c] = t[c].map(lambda v: '—' if v != v else f'{v:+.1%}')
             t['edge'] = t['edge'].map('{:.0%}'.format)
             t['validated'] = t['validated'].map({True: '✅', False: '—'})
-            with st.expander('All rules tested'):
+            with nestsafe.expander('All rules tested'):
                 st.dataframe(t, hide_index=True, use_container_width=True)
     else:
         st.caption('Need at least 50 games with closing lines to fit the blend.')

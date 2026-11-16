@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, date
 from typing import Optional, Dict, List, Any, Tuple
 import pandas as pd
 import streamlit as st
+import nestsafe
 import plotly.graph_objects as go
 import plotly.express as px
 from odds_page import render_odds_page
@@ -4235,7 +4236,7 @@ def render_game_card(game: Any, db: Any = None, worker: Any = None, category: st
         has_summary = bool(db.get_game_summary(event_id))
 
     # ── Game Detail expander ────────────────────────────────────
-    with st.expander("📊 Game Detail  (Box Score · Players · Win Prob · Betting · Injuries)", expanded=False):
+    with nestsafe.expander("📊 Game Detail  (Box Score · Players · Win Prob · Betting · Injuries)", expanded=False):
         if not has_summary:
             st.info("Game detail appears once the game starts.")
         else:
@@ -4251,7 +4252,7 @@ def render_game_card(game: Any, db: Any = None, worker: Any = None, category: st
 
     pbp_icon = "🏈" if is_football else {"basketball": "🏀", "baseball": "⚾", "hockey": "🏒", "soccer": "⚽"}.get(category, "▶")
 
-    with st.expander(f"{pbp_icon} Play-by-Play", expanded=False):
+    with nestsafe.expander(f"{pbp_icon} Play-by-Play", expanded=False):
         already_fetched = db.has_pbp(event_id)
 
         if not already_fetched and worker and category and sport:
@@ -5570,7 +5571,7 @@ def main():
         info = _HOW_IT_WORKS.get(key)
         if not info:
             return
-        with st.expander(
+        with nestsafe.expander(
             f"{info['icon']} **How this tab works** — click to expand",
             expanded=False
         ):
@@ -6146,7 +6147,7 @@ def main():
                             st.plotly_chart(_fig6, use_container_width=True)
 
                         # ── Results table ──────────────────────────────
-                        with st.expander("📋 Full Season Results", expanded=False):
+                        with nestsafe.expander("📋 Full Season Results", expanded=False):
                             _res_disp = _t2_done[['date', 'home_away', 'opponent',
                                                    'my_score', 'opp_score',
                                                    'diff', 'won']].copy()
@@ -6619,7 +6620,7 @@ def main():
                                 ]
                                 if 'period' in _pg_pl.columns:
                                     _pg_pl = _pg_pl.sort_values('period')
-                                with st.expander(f"🏟 {_pg_lbl} — {len(_pg_pl)} plays"):
+                                with nestsafe.expander(f"🏟 {_pg_lbl} — {len(_pg_pl)} plays"):
                                     for _, _ply in _pg_pl.iterrows():
                                         _si2 = '🏆 ' if _ply.get('scoring_play') else ''
                                         _qtr2 = f"Q{_ply.get('period', '?')} {_ply.get('clock', '')}"
@@ -7731,7 +7732,7 @@ def main():
                     st.plotly_chart(_sc_fig, use_container_width=True)
 
                     # ── Game Detail Viewer ─────────────────────
-                    with st.expander(
+                    with nestsafe.expander(
                         f"🔍 Game Detail Viewer — click to look up any game",
                         expanded=False,
                     ):
@@ -8403,7 +8404,7 @@ def main():
                 _mask_hv = _df_fields['field_path'].str.lower().str.contains(
                     '|'.join(_HIGH_VALUE_KW), na=False)
                 if _mask_hv.any() and not _fe_hv_only:
-                    with st.expander(
+                    with nestsafe.expander(
                         f"⭐ High-value / parser-worthy fields "
                         f"({_mask_hv.sum()} found)"
                     ):
@@ -8420,7 +8421,7 @@ def main():
                 # ── 📡 Live Query Builder ───────────────────────
                 _lqb_key_sfx = f"{_fe_sel_sk}__{_fe_sel_et}".replace('/', '_')
 
-                with st.expander(
+                with nestsafe.expander(
                     "📡 **Live Query Builder** — pick fields → fetch real rows from ESPN",
                     expanded=bool(st.session_state.get('schema_live_result')),
                 ):
@@ -8602,7 +8603,7 @@ def main():
             _slr_cols = list(_slr_df.columns)
             _slr_ncols = [c for c in _slr_cols
                           if pd.api.types.is_numeric_dtype(_slr_df[c])]
-            with st.expander(
+            with nestsafe.expander(
                 f"📡 Use Schema Live Data — {_slr['source_info']} "
                 f"({len(_slr_df):,} rows × {len(_slr_cols)} cols)",
                 expanded=True,
@@ -8781,7 +8782,7 @@ def main():
                     )
 
         # ── Sub-section: DB snapshot — what data do we actually have? ──
-        with st.expander("📦 What's in your local database?", expanded=False):
+        with nestsafe.expander("📦 What's in your local database?", expanded=False):
             st.caption(
                 "Row counts per table per league. "
                 "Sources with 0 rows need their respective tabs to be populated first."
@@ -8818,7 +8819,7 @@ def main():
             )
 
         # ── Main builder expander ──────────────────────────────────
-        with st.expander("➕ Create a New Custom View", expanded=False):
+        with nestsafe.expander("➕ Create a New Custom View", expanded=False):
 
             # ── Name / sport row ──────────────────────────────────
             _cvb_r1, _cvb_r2 = st.columns([4, 3])
@@ -9325,7 +9326,7 @@ def main():
             )
         else:
             for _vi, _vcfg in enumerate(_sv_list):
-                with st.expander(
+                with nestsafe.expander(
                     f"📊 {_vcfg.get('name', 'Unnamed View')}  ·  "
                     f"{_vcfg.get('sport_key', '')}  ·  "
                     f"{_vcfg.get('data_source', '')}  ·  "
@@ -9479,7 +9480,7 @@ def main():
                             st.success(f"✅ Full sync complete — {len(_sync_log)} endpoint(s) refreshed.")
                         st.rerun()
             with _adm_da_c3:
-                with st.expander("📋 What does this sync?"):
+                with nestsafe.expander("📋 What does this sync?"):
                     st.markdown(
                         "For **every active league** it fetches:\n"
                         "- **Scoreboard** — latest game scores, status, leaders\n"

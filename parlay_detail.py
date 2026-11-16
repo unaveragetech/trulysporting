@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
+import nestsafe
 
 import parlay_pricing as PP
 import parlay_rel as R
@@ -90,7 +91,7 @@ def render_leg_details(l: P.Leg, tz) -> None:
                        f"Our chance: **{l.p:.1%}**.")
     near = [q for q in l.quotes if not q.get('exact', True)]
     if near:
-        with st.expander('Same market, different line (not the same bet)'):
+        with nestsafe.expander('Same market, different line (not the same bet)'):
             st.dataframe(_quotes_table(near, None), hide_index=True, use_container_width=True)
     elif not exact and l.kind == 'player':
         st.caption('Player milestone prices are not in our data. Sportsbooks sell these as alternate player props; check the price '
@@ -226,7 +227,7 @@ def why_dialog(p: P.Parlay, rank: int, tz, built_at: str = '') -> None:
         st.markdown('### 🧩 The legs')
         st.caption('Open a leg to see every source, every price we found, and the game, team and player facts behind it.')
         for i, l in enumerate(p.legs, 1):
-            with st.expander(f"{i}. {l.pick} · {l.p:.0%} · {l.matchup} ({l.league})", expanded=False):
+            with nestsafe.expander(f"{i}. {l.pick} · {l.p:.0%} · {l.matchup} ({l.league})", expanded=False):
                 render_leg_details(l, tz)
         st.markdown('### 🧮 How we picked and priced')
         st.markdown('From every game still to be played in a league that is running, each leg must clear the minimum chance you set. The search '

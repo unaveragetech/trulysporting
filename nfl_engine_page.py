@@ -5,6 +5,7 @@ from typing import Optional
 
 import pandas as pd
 import streamlit as st
+import nestsafe
 
 REFRESH_SECONDS = 20
 _KIND = {"run": "Run", "comp": "Pass complete", "inc": "Pass incomplete", "sack": "Sack",
@@ -391,7 +392,7 @@ def _tuning_tab(rt) -> None:
     import pathlib
     md = pathlib.Path(__file__).parent / "docs" / "NFL_ENGINE_INGAME.md"
     if md.exists():
-        with st.expander("Historical in-game backtest (held-out seasons)"):
+        with nestsafe.expander("Historical in-game backtest (held-out seasons)"):
             st.markdown(md.read_text(encoding="utf-8"))
     from nfl_engine import nextplay
     gp = nextplay.grade_projections()
@@ -467,7 +468,7 @@ def _dynamics_tab(rt) -> None:
     m2.metric(f"{a} run", _pct(1 - p_a))
     m3.metric("League-average pass", _pct(p_lg))
 
-    with st.expander(f"Pass / run map: when does {a} throw against {b}?", expanded=True):
+    with nestsafe.expander(f"Pass / run map: when does {a} throw against {b}?", expanded=True):
         def grid(rows, cols, fn):
             return pd.DataFrame({c: [fn(r, c) for r in rows] for c in cols}, index=rows)
         yt = [1, 2, 3, 5, 7, 10, 15]
@@ -487,7 +488,7 @@ def _dynamics_tab(rt) -> None:
         st.dataframe(g2, use_container_width=True)
         st.caption(f"Engine probabilities for {a} against {b}'s defense: league situation model, shifted by each team's tracked "
                    "tendencies in that situation and by what the last play was.")
-    with st.expander(f"Coach decisions ({a} vs league)", expanded=True):
+    with nestsafe.expander(f"Coach decisions ({a} vs league)", expanded=True):
         ct = D.coach_decisions(ctx)
         row, lg = ct.loc[a], ct.drop(columns=[c for c in ct if c.endswith("_vs_lg")] + ["games", "kneels", "4th_downs"]).mean()
         keep = [c for c in ct.columns if not c.endswith("_vs_lg") and c not in ("games", "kneels", "4th_downs")]
@@ -495,7 +496,7 @@ def _dynamics_tab(rt) -> None:
                                    "diff": [row[c] - lg[c] for c in keep]}).round(3), hide_index=True, use_container_width=True)
         st.caption(f"{int(row['4th_downs'])} fourth downs and {int(row['games'])} games in the last two seasons. Go rate counts "
                    "going for it vs punting or kicking. Timeouts are the team's own per game.")
-    with st.expander("Play calling by situation"):
+    with nestsafe.expander("Play calling by situation"):
         fam = st.radio("Situation", ["dd", "sc", "zone", "resp"], horizontal=True, key="nfl_dyn_fam",
                        format_func=lambda x: {"dd": "down & distance", "sc": "score & period", "zone": "field zone", "resp": "after what"}[x])
         t1, t2 = st.columns(2)
@@ -503,10 +504,10 @@ def _dynamics_tab(rt) -> None:
         t1.dataframe(D.situational(ctx, a, fam), use_container_width=True)
         t2.markdown(f"**{b} defense** (pass % faced)")
         t2.dataframe(D.situational(ctx, b, fam, "def"), use_container_width=True)
-    with st.expander("What they run in response to what just happened"):
+    with nestsafe.expander("What they run in response to what just happened"):
         st.dataframe(D.response_matrix(ctx, a), use_container_width=True)
         st.caption("Rows: the previous snap of the same drive. Columns: share of the next call, then the gap to the league.")
-    with st.expander("Formations, personnel and coverage"):
+    with nestsafe.expander("Formations, personnel and coverage"):
         pp = D.personnel_profile(ctx, a)
         if pp.empty:
             st.caption("Participation data (formation / personnel) is not published for this season yet.")
@@ -517,10 +518,10 @@ def _dynamics_tab(rt) -> None:
         if dp:
             st.markdown(f"**{b} defense**")
             st.json(dp)
-    with st.expander(f"Player usage ({a})"):
+    with nestsafe.expander(f"Player usage ({a})"):
         pu = D.player_usage(ctx, a)
         st.dataframe(pu, hide_index=True, use_container_width=True) if not pu.empty else st.caption("No usage data.")
-    with st.expander(f"Recent meetings: {a} vs {b}"):
+    with nestsafe.expander(f"Recent meetings: {a} vs {b}"):
         h = D.head_to_head(ctx, games, a, b)
         st.dataframe(h, hide_index=True, use_container_width=True) if not h.empty else st.caption("No recent meetings in the data window.")
         m = ctx[ctx["scrim"] & (ctx["posteam"] == a) & (ctx["defteam"] == b)]
