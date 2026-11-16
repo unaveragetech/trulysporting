@@ -59,9 +59,21 @@ def payout(decimal: float, stake: float) -> Tuple[float, float]:
     return stake * decimal, stake * (decimal - 1)
 
 
+_CANON = {'draftkings': 'DraftKings', 'draftkingssportsbook': 'DraftKings', 'fanduel': 'FanDuel', 'betmgm': 'BetMGM', 'caesars': 'Caesars',
+          'caesarssportsbook': 'Caesars', 'williamhillcaesars': 'Caesars', 'thescore': 'theScore Bet', 'thescorebet': 'theScore Bet',
+          'espnbet': 'ESPN BET', 'fanatics': 'Fanatics', 'fanaticssportsbook': 'Fanatics', 'novig': 'Novig', 'kalshi': 'Kalshi',
+          'polymarket': 'Polymarket', 'polymarketus': 'Polymarket US'}
+
+
+def canon_book(name: str) -> str:
+    """One spelling per sportsbook ("Draft Kings", "DraftKings Sportsbook" and "DraftKings" are the same place)."""
+    k = re.sub(r'[^a-z0-9]', '', str(name or '').lower())
+    return _CANON.get(k, str(name or '').strip() or 'ESPN book')
+
+
 def quote(source: str, kind: str, price: float, opp: Optional[float], line: Optional[float], via: str, link: Optional[str] = None,
           note: str = '', exact: bool = True, ts: Optional[str] = None, sid: Optional[str] = None) -> Dict[str, Any]:
-    return {'source': source, 'sid': sid, 'kind': kind, 'price': float(price), 'opp': None if opp is None else float(opp), 'line': line,
+    return {'source': canon_book(source), 'sid': sid, 'kind': kind, 'price': float(price), 'opp': None if opp is None else float(opp), 'line': line,
             'via': via, 'link': link, 'note': note, 'exact': exact, 'ts': ts, 'decimal': to_decimal(price)}
 
 
@@ -77,7 +89,7 @@ def _f(v) -> Optional[float]:
 
 def espn_quotes(g: Dict, kind: str, side: str) -> List[Dict]:
     """The price ESPN's embedded book (usually DraftKings) shows for this leg."""
-    book = g.get('book') or 'ESPN book'
+    book = canon_book(g.get('book') or 'ESPN book')
     if kind == 'ml':
         mine, opp = (_f(g.get('home_ml')), _f(g.get('away_ml'))) if side == 'home' else (_f(g.get('away_ml')), _f(g.get('home_ml')))
         line = None
@@ -172,24 +184,21 @@ def parse_board(data: Dict) -> Dict:
 
 
 def fetch_board(route: str) -> Optional[Dict]:
-    """One Unabated call per league, shared by every visitor (the free tier allows one odds call per 5 seconds)."""
-    hit = _BOARDS.get(route)
-    if hit and time.time() - hit[0] < (_BOARD_TTL if hit[1] else _FAIL_TTL):
-        return hit[1]
+    """One Unabated call per league, shared by every visitor (the free tier allows one odds call per 5 seconds).
+    A failed call keeps serving the last good board (up to hours old; each quote carries its own timestamp and is age-checked)."""
+    import market_cache as MC
     import unabated
     if not unabated.api_key():
         return None
-    with _LOCK:
-        hit = _BOARDS.get(route)
-        if hit and time.time() - hit[0] < (_BOARD_TTL if hit[1] else _FAIL_TTL):
-            return hit[1]
-        try:
-            body = unabated._get(f'/market/{route}/straight/odds', [('betTypeId', 1), ('betTypeId', 2), ('betTypeId', 3)], odds=True, tries=2)
-            board = parse_board(body.get('data') or {})
-        except Exception:
-            board = None
-        _BOARDS[route] = (time.time(), board)
+
+    def load() -> Dict:
+        body = unabated._get(f'/market/{route}/straight/odds', [('betTypeId', 1), ('betTypeId', 2), ('betTypeId', 3)], odds=True, tries=2)
+        return parse_board(body.get('data') or {})
+    try:
+        board, _ = MC.get(f'unabated:{route}', _BOARD_TTL, load)
         return board
+    except Exception:
+        return None
 
 
 def find_event(board: Dict, g: Dict) -> Optional[Dict]:
