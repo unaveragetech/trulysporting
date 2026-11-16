@@ -104,3 +104,26 @@ def test_check_cache_is_keyed_by_the_legs_not_the_record():
     a, b = [leg(1, ["DraftKings"])], [leg(1, ["FanDuel"])]
     assert V.signature(a) == V.signature(b)
     assert V.signature(a) != V.signature([leg(2, ["DraftKings"])])
+
+
+def test_failing_league_is_backed_off_not_retried_by_every_visitor(monkeypatch):
+    import unabated
+    MC.clear()
+    calls = []
+    monkeypatch.setattr(unabated, "api_key", lambda: "k")
+    monkeypatch.setattr(unabated, "_get", lambda *a, **k: calls.append(1) or (_ for _ in ()).throw(RuntimeError("Unexpected error")))
+    assert PP.fetch_board("cfb") is None and PP.fetch_board("cfb") is None and PP.fetch_board("cfb") is None
+    assert len(calls) == 1
+
+
+def test_warmer_runs_once_and_snapshot_round_trips(tmp_path, monkeypatch):
+    MC.clear()
+    monkeypatch.setattr(MC, "SNAP", str(tmp_path / "s.json"))
+    MC.get("persist:x", 60, lambda: {"a": 1}, persist=True)
+    MC.clear()
+    assert MC.load_snapshot() == 1 and MC.peek("persist:x")[1] == {"a": 1}
+    ran = []
+    monkeypatch.setitem(MC._WARMER, "thread", None)
+    assert MC.start_warmer(lambda: [lambda: ran.append(1)], 3600) is True
+    time.sleep(0.2)
+    assert ran and MC.start_warmer(lambda: [], 3600) is False
