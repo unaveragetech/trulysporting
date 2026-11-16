@@ -220,6 +220,22 @@ def _top_view(legs: List[P.Leg], info: Dict, cfg: Dict, tz) -> None:
         pz = P.build_placeable(legs, kmin, kmax, top, cfg['min_p'], 0, rank, **kw)
     else:
         pz = P.build_parlays(legs, kmin, kmax, top, cfg['min_p'], max_pl, rank, require_priced=False, **kw)
+    notes = []
+    if not pz and single:  # nothing one book can take: show every parlay the legs allow, flagged as not confirmed placeable
+        pz = P.build_parlays(legs, kmin, kmax, top, cfg['min_p'], max_pl or 2, rank, require_priced=False, **kw)
+        if pz:
+            notes.append('No parlay that one sportsbook can take fits your settings, so these use every leg we have. Some legs may not be '
+                         'on a book; the Open at sportsbook check says which.')
+    if not pz:  # still nothing: loosen the filters step by step so the page is never empty while legs exist
+        loose = dict(options_per_game=per_game, min_parlay_p=0.0, max_parlay_p=1.0, min_rel=0, must_include=())
+        for k2, p2 in ((min(kmin, 3), min(cfg['min_p'], 0.6)), (2, 0.5), (2, 0.0)):
+            pz = P.build_parlays(legs, k2, max(kmax, k2), top, p2, 3, rank, require_priced=False, **loose)
+            if pz:
+                notes.append(f'Nothing matched your exact settings, so the limits were loosened to {k2}+ legs at {p2:.0%}+ chance per leg '
+                             'with no band or reliability filter. Tighten the controls to narrow it down.')
+                break
+    for n_ in notes:
+        st.info(n_)
     saved_sigs = {tuple(sorted(l['key'] for l in r['legs'])) for r in (st.session_state.get('pl_saved') or [])}
     if not pz:
         st.warning('No parlay matches these settings. Try a lower minimum chance, a wider hit-chance band, a lower minimum reliability, '
