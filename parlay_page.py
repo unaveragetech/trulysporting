@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 import streamlit as st
+import nestsafe
 
 import parlay_detail as D
 import parlay_pricing as PP
@@ -63,7 +64,7 @@ def _flags(l: P.Leg) -> str:
 
 def _settings(label: Callable[[str], str], board: pd.DataFrame) -> Optional[Dict]:
     hours = st.session_state.get('pl_hours', 24)
-    with st.expander('⚙️ Leagues and filters', expanded=False):
+    with nestsafe.expander('⚙️ Leagues and filters', expanded=False):
         d1, d2, d3 = st.columns(3)
         hours = d1.slider('Games starting within (hours)', 3, 72, 24, key='pl_hours')
         min_p = d2.slider('Min chance per leg', 0.50, 0.95, step=0.01, key='pl_minp')
@@ -194,7 +195,7 @@ def _top_view(legs: List[P.Leg], info: Dict, cfg: Dict, tz) -> None:
     st.markdown('**Strategy**')
     st.segmented_control('Strategy', list(R.PRESETS), key='pl_preset', on_change=_apply_preset, label_visibility='collapsed')
     st.caption(R.PRESETS.get(ss.get('pl_preset') or R.DEFAULT_PRESET, {}).get('desc', ''))
-    with st.expander('⚙️ Tune the generator (every control)', expanded=False):
+    with nestsafe.expander('⚙️ Tune the generator (every control)', expanded=False):
         c1, c2, c3, c4 = st.columns(4)
         kmin, kmax = c1.slider('Legs per parlay', 2, 12, key='pl_k')
         top = c2.slider('How many parlays', 3, 25, 10, key='pl_top')
@@ -455,9 +456,9 @@ def _venue_box(r: Dict, tz) -> Dict:
         st.error('🏦 No sportsbook can be confirmed for this parlay right now. ' + ('Closed legs: ' + ', '.join(res['closed']) + '. ' if res.get('closed') else '')
                  + 'See the checks below.')
     if res.get('slip') and res['slip']['ok']:
-        with st.expander('🎟 Open at a sportsbook (legs filled in where the book allows it)'):
+        with nestsafe.expander('🎟 Open at a sportsbook (legs filled in where the book allows it)'):
             S.render_slip(res, 'rec' + r['id'])
-    with st.expander(f'Where can this be bought? Checked {when}'):
+    with nestsafe.expander(f'Where can this be bought? Checked {when}'):
         rows = [{'Venue': v['name'], 'Type': 'Sportsbook parlay' if v['type'] == 'sportsbook' else 'Single bets only (not a parlay)',
                  'Status': _VSTAT[v['status']], 'Price': D.am(v['decimal']) if v['decimal'] else '—',
                  '$10 pays': D.money(10 * v['decimal']) if v['decimal'] else '—', 'Legs verified': f"{v['covered']}/{v['n']}",
@@ -595,7 +596,7 @@ def _my_view(saved: Optional[List[Dict]], tz) -> None:
             st.rerun()
         tr = T.track_record(recs)
         if tr['legs']:
-            with st.expander(f"📊 Track record: {tr['parlays_won']}/{tr['parlays']} parlays won, {tr['legs_won']}/{tr['legs']} legs hit "
+            with nestsafe.expander(f"📊 Track record: {tr['parlays_won']}/{tr['parlays']} parlays won, {tr['legs_won']}/{tr['legs']} legs hit "
                              f"(we predicted {tr['avg_predicted']:.0%})"):
                 st.dataframe(pd.DataFrame([{'Predicted chance': b['range'], 'Legs': b['legs'], 'Average predicted': f"{b['predicted']:.0%}",
                                             'Actually hit': f"{b['actual']:.0%}"} for b in tr['buckets']]), hide_index=True)

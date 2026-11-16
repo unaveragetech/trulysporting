@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, Optional
 
 import pandas as pd
 import streamlit as st
+import nestsafe
 
 from fanduel_odds import ODDS_SPORT_MAP, _api_key, _fmt_price, american_to_prob, \
     events_to_df, fetch_fanduel_odds
@@ -513,7 +514,7 @@ def render_matchups_page(db: Any, worker: Any, season_for: Callable[[str], int],
 
     # Free-form comparison of any two teams in the league.
     st.divider()
-    with st.expander('🆚 Compare any two teams'):
+    with nestsafe.expander('🆚 Compare any two teams'):
         teams = db.get_teams_df(ep)
         if teams.empty:
             st.caption('No teams stored for this league yet.')

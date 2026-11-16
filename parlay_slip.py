@@ -2,6 +2,7 @@
 from typing import Any, Dict, List
 
 import streamlit as st
+import nestsafe
 
 import betslip as B
 import parlay_compare as CMP
@@ -55,7 +56,7 @@ def render_slip(res: Dict[str, Any], key: str) -> None:
     st.code(best['ticket'], language=None)
     others = [b for b in plan['books'] if b is not best]
     if others:
-        with st.expander(f'Other places that can take it ({len(others)})'):
+        with nestsafe.expander(f'Other places that can take it ({len(others)})'):
             for b in others:
                 ret2, _ = PP.payout(b['decimal'], plan['stake'])
                 st.markdown(f"**{b['name']} {b['american']:+d}** · {STATUS[b['status']]} · \\${plan['stake']:,.2f} pays {D.mdm(ret2)}")
