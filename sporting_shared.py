@@ -99,6 +99,20 @@ def fetch_events(ep: str, timeout: float = 12.0) -> List[Dict]:
     return list(seen.values())
 
 
+def fetch_events_on(ep: str, date_et: str, timeout: float = 12.0) -> List[Dict]:
+    """Raw ESPN events for one league on one US-Eastern calendar day (YYYYMMDD), including college groups."""
+    seen: Dict[str, Dict] = {}
+    for g in COLLEGE_GROUPS.get(ep, [None]):
+        params: Dict = {'limit': 300, 'dates': date_et}
+        if g:
+            params['groups'] = g
+        r = _requests.get(ESPN_SITE.format(ep=ep), params=params, timeout=timeout, headers={'User-Agent': 'Mozilla/5.0 (TrulySporting)'})
+        r.raise_for_status()
+        for ev in r.json().get('events', []):
+            seen[str(ev.get('id'))] = ev
+    return list(seen.values())
+
+
 def fetch_events_many(eps: List[str], workers: int = 10) -> Dict[str, List[Dict]]:
     with _Pool(max_workers=workers) as pool:
         return dict(zip(eps, pool.map(fetch_events, eps)))

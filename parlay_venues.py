@@ -173,10 +173,10 @@ def evaluate(legs: List[Any], now: Optional[pd.Timestamp] = None) -> Dict[str, A
 
 # ── Live refresh of a saved parlay ──────────────────────────────────────────
 
-def _games_by_id(eps: List[str]) -> Dict[str, Dict]:
-    from live import fetch_all_games
-    df = fetch_all_games(tuple(sorted(set(eps))))
-    return {} if df.empty else {str(r['id']): r for r in df.to_dict('records')}
+def _games_for_legs(legs: List[Any]) -> Tuple[Dict[str, Dict], Dict]:
+    """Live rows for the games these legs are in, loaded by each game's own date (not just today)."""
+    from live import games_for
+    return games_for([(l.ep, l.start) for l in legs])
 
 
 def _kalshi_by_ep(eps: List[str], games: Dict[str, Dict]) -> None:
@@ -201,21 +201,31 @@ def _kalshi_by_ep(eps: List[str], games: Dict[str, Dict]) -> None:
 
 
 def refresh_legs(legs: List[Any], now: Optional[pd.Timestamp] = None) -> List[Any]:
-    """Replace each leg's saved prices with live ones. Legs whose game vanished are marked gone."""
+    """Replace each leg's saved prices with live ones.
+
+    The boards are loaded for the day each game is on, so a parlay for tomorrow or next week is priced like one for tonight.
+    A game is called gone only if its day's board loaded and the game is not on it.  If the board could not be loaded the saved
+    prices are kept, marked ``saved``, and the age check decides whether they are still usable.
+    """
     now = now or pd.Timestamp.now(tz='UTC')
     stamp = now.isoformat()
-    eps = [l.ep for l in legs if l.kind in ('ml', 'spread', 'total')]
-    games = _games_by_id(eps) if eps else {}
-    _kalshi_by_ep(eps, games)
-    for l in legs:
-        if l.kind not in ('ml', 'spread', 'total'):
-            continue
+    gl = [l for l in legs if l.kind in ('ml', 'spread', 'total')]
+    games, meta = _games_for_legs(gl) if gl else ({}, {'failed': [], 'stale': False})
+    _kalshi_by_ep([l.ep for l in gl], games)
+    for l in gl:
+        saved = list(l.quotes)
         l.quotes = []
         g = games.get(str(l.game_id))
         if g is None:
-            l.info = {**l.info, 'gone': True}
+            if meta.get('failed') or meta.get('stale'):
+                l.info = {**l.info, 'gone': False, 'board_unavailable': True}
+                l.quotes = [{**q, 'note': (q.get('note') or '') + ' (saved price: live board unavailable)'} for q in saved
+                            if q.get('kind') in ('sportsbook', 'espn')]
+            else:
+                l.info = {**l.info, 'gone': True}
             continue
-        l.info = {**l.info, 'gone': False, 'live_state': g.get('state'), 'live_detail': g.get('detail')}
+        l.info = {**l.info, 'gone': False, 'board_unavailable': False, 'live_state': g.get('state'), 'live_detail': g.get('detail'),
+                  'home_logo': g.get('home_logo'), 'away_logo': g.get('away_logo'), 'tv': g.get('tv')}
         side = l.meta.get('side')
         qs = PP.espn_quotes(g, l.kind, side)
         if l.kind == 'ml':
@@ -226,13 +236,18 @@ def refresh_legs(legs: List[Any], now: Optional[pd.Timestamp] = None) -> List[An
                 q['exact'] = False
                 q['note'] = f"line moved to {q['line']:+g}: not the bet you saved"
         l.quotes += qs
-    PP.attach_unabated([l for l in legs if l.kind in ('ml', 'spread', 'total')], games)
+    PP.attach_unabated(gl, games)
     return legs
 
 
 _CACHE: Dict[str, Tuple[float, Dict]] = {}
 _CACHE_LOCK = threading.Lock()
-TTL = 90
+TTL = 60
+
+
+def signature(legs: List[Any]) -> str:
+    """Identity of a parlay's content (its legs, not who saved it), so every visitor shares one check."""
+    return '|'.join(sorted(f"{l.key}@{l.meta.get('line', '')}" for l in legs))
 
 
 def check_legs(legs: List[Any], key: str, force: bool = False, stake: float = 10.0) -> Dict:
@@ -243,6 +258,7 @@ def check_legs(legs: List[Any], key: str, force: bool = False, stake: float = 10
     import dataclasses
 
     import betslip
+    key = signature(legs)  # same legs = same answer for every visitor
     with _CACHE_LOCK:
         hit = _CACHE.get(key)
         if hit and not force and time.time() - hit[0] < TTL:

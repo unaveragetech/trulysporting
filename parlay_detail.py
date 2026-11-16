@@ -63,6 +63,8 @@ def _facts_table(d: Dict) -> pd.DataFrame:
 
 def render_leg_details(l: P.Leg, tz) -> None:
     """Sources, every price, and the game / team / player facts behind one leg."""
+    import parlay_compare as CMP
+    CMP.leg_header(l)
     rel = R.reliability(l)
     o = R.leg_odds(l)
     st.markdown(f"**Reliability: {rel['label']} ({rel['score']:.0f} / 100)** · our fair odds "
@@ -107,7 +109,14 @@ def render_leg_details(l: P.Leg, tz) -> None:
             hide_index=True, use_container_width=True)
         vals = info.get('recent_values') or []
         if vals:
-            st.caption('Recent games (oldest to newest left to right): ' + ', '.join(f'{v:g}' for v in vals[::-1]))
+            thr = float(info.get('threshold', 0))
+            seq = vals[::-1]
+            hit = ['hit' if v >= thr else 'missed' for v in seq]
+            chart = pd.DataFrame({'Game (oldest to newest)': range(1, len(seq) + 1), 'Value': seq, 'Result': hit})
+            st.markdown(f"**Last {len(seq)} games vs the {thr:g} line** ({sum(h == 'hit' for h in hit)} hits)")
+            st.bar_chart(chart, x='Game (oldest to newest)', y='Value', color='Result', height=180)
+            if info.get('position') or info.get('jersey'):
+                st.caption(f"{info.get('player')} · {info.get('position') or ''} {('#' + str(info['jersey'])) if info.get('jersey') else ''}")
         game = info.get('game') or {}
     else:
         game = info

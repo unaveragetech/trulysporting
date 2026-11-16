@@ -297,8 +297,10 @@ def player_legs(db: Any, g: Dict, team_abbr: str, team_id: str, opp_factor: floa
             quest = set(roster.loc[roster['injury_status'].fillna('').str.lower().str.contains('questionable|day'), 'display_name'])
         else:
             quest = set()
+        heads = {r.display_name: (r.headshot_url, r.position, r.jersey) for r in roster.itertuples()} if not roster.empty else {}
     except Exception:
         quest = set()
+        heads = {}
     rows = []
     for r in raw.itertuples():
         cat = (r.category or 'stats').lower()
@@ -370,7 +372,9 @@ def player_legs(db: Any, g: Dict, team_abbr: str, team_id: str, opp_factor: floa
                          info={'player': player, 'team': team_abbr, 'stat': f'{stat} ({cat})', 'threshold': float(thr),
                                'games_used': n, 'team_games': team_games, 'recent_values': [float(v) for v in vals],
                                'average': mu, 'std_dev': sd, 'hits': hits, 'opponent_factor': f, 'expected': mean,
-                               'availability_allowance': 1 - PLAYER_AVAIL, 'listed_questionable': player in quest}))
+                               'availability_allowance': 1 - PLAYER_AVAIL, 'listed_questionable': player in quest,
+                               'headshot': (heads.get(player) or ('',))[0] or None, 'position': (heads.get(player) or ('', '', ''))[1] or None,
+                               'jersey': (heads.get(player) or ('', '', ''))[2] or None}))
     cands.sort(key=lambda l: -l.p)
     return cands[:max_per_team]
 
@@ -436,6 +440,7 @@ def _decorate(legs: List[Leg], g: Dict, pred: Optional[Dict], fh: Dict, fa: Dict
             'lines': {'spread (home)': g.get('spread'), 'total': g.get('total'), 'home moneyline': g.get('home_ml'),
                       'away moneyline': g.get('away_ml')},
             'kalshi_home_win': g.get('kalshi_home'), 'engine_home_win': engine_p, 'model_weight_vs_market': blend_w,
+            'home_logo': g.get('home_logo'), 'away_logo': g.get('away_logo'),
             'form_home': _form_view(fh), 'form_away': _form_view(fa),
             'model': None if not pred else {k: round(float(v), 2) for k, v in pred.items() if isinstance(v, (int, float))},
             'injuries_home': inj_h.get('players', [])[:6], 'injuries_away': inj_a.get('players', [])[:6]}

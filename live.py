@@ -363,6 +363,43 @@ def fetch_all_games(eps: Tuple[str, ...] = tuple(ALL_ESPN_LEAGUES)) -> pd.DataFr
     return pd.DataFrame(rows)
 
 
+def games_on(ep: str, date_et: str) -> Tuple[Dict[str, Dict], Dict]:
+    """Game rows for one league on one Eastern day, from the server-wide cache (shared by every visitor, kept if ESPN hiccups)."""
+    import market_cache as MC
+    from sporting_shared import fetch_events_on
+
+    def load() -> Dict[str, Dict]:
+        return {str(r['id']): r for r in (event_row(ep, ev) for ev in fetch_events_on(ep, date_et))}
+    try:
+        return MC.get(f'games:{ep}:{date_et}', 45, load)
+    except Exception:
+        return {}, {'age': None, 'stale': True, 'hit': False, 'failed': True}
+
+
+def games_for(wanted: List[Tuple[str, str]]) -> Tuple[Dict[str, Dict], Dict]:
+    """Rows for every (league, ISO start time) asked for: loads the day each game is on (Eastern) plus the day either side,
+    so a game starting just after midnight UTC is still found.  Returns ({game id: row}, {'stale': bool, 'failed': [...]})."""
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+    need = set()
+    for ep, start in wanted:
+        t = pd.to_datetime(start, utc=True, errors='coerce')
+        t = pd.Timestamp.now(tz='UTC') if pd.isna(t) else t
+        et = t.tz_convert(ZoneInfo('America/New_York'))
+        for d in (-1, 0, 1):
+            need.add((ep, (et + timedelta(days=d)).strftime('%Y%m%d')))
+    out: Dict[str, Dict] = {}
+    meta = {'stale': False, 'failed': [], 'days': len(need)}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for (ep, d), (rows, st_) in zip(sorted(need), pool.map(lambda k: games_on(*k), sorted(need))):
+            out.update(rows)
+            meta['stale'] |= bool(st_.get('stale'))
+            if st_.get('failed'):
+                meta['failed'].append(f'{ep} {d}')
+    return out, meta
+
+
 def fetch_all_live() -> pd.DataFrame:
     df = fetch_all_games()
     return df[df['state'] == 'in'].reset_index(drop=True) if not df.empty else df
