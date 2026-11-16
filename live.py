@@ -371,9 +371,26 @@ def games_on(ep: str, date_et: str) -> Tuple[Dict[str, Dict], Dict]:
     def load() -> Dict[str, Dict]:
         return {str(r['id']): r for r in (event_row(ep, ev) for ev in fetch_events_on(ep, date_et))}
     try:
-        return MC.get(f'games:{ep}:{date_et}', 45, load)
+        return MC.get(f'persist:games:{ep}:{date_et}', 45, load, persist=True)
     except Exception:
         return {}, {'age': None, 'stale': True, 'hit': False, 'failed': True}
+
+
+def _warm_tasks() -> list:
+    """Today through three days out for every league we price, plus the Unabated boards."""
+    import parlay_pricing as PP
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+    now = pd.Timestamp.now(tz=ZoneInfo('America/New_York'))
+    out = [(lambda e=ep, d=(now + timedelta(days=k)).strftime('%Y%m%d'): games_on(e, d)) for ep in PP.ROUTES for k in range(4)]
+    out += [(lambda r=r: PP.fetch_board(r)) for r in PP.ROUTES.values()]
+    return out
+
+
+def warm_start() -> bool:
+    """Keep the shared cache warm in the background (once per server process)."""
+    import market_cache as MC
+    return MC.start_warmer(_warm_tasks, 60.0)
 
 
 def games_for(wanted: List[Tuple[str, str]]) -> Tuple[Dict[str, Dict], Dict]:
@@ -382,6 +399,7 @@ def games_for(wanted: List[Tuple[str, str]]) -> Tuple[Dict[str, Dict], Dict]:
     from concurrent.futures import ThreadPoolExecutor
     from datetime import timedelta
     from zoneinfo import ZoneInfo
+    warm_start()
     need = set()
     for ep, start in wanted:
         t = pd.to_datetime(start, utc=True, errors='coerce')

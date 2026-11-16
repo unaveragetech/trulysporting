@@ -196,8 +196,13 @@ def fetch_board(route: str) -> Optional[Dict]:
         return parse_board(body.get('data') or {})
     try:
         board, _ = MC.get(f'unabated:{route}', _BOARD_TTL, load)
-        return board
+        return board  # None while backed off
     except Exception:
+        # a league Unabated cannot serve (their cfb route fails) must not be retried by every visitor: back off for 10 minutes
+        MC.put(f'unabated:{route}', None)
+        hit = MC.peek(f'unabated:{route}')
+        if hit:
+            MC._STORE[f'unabated:{route}'] = (time.time() - _BOARD_TTL + _FAIL_TTL, None)
         return None
 
 

@@ -96,3 +96,29 @@ def clear() -> None:
     _STORE.clear()
     for k in STATS:
         STATS[k] = 0
+
+
+_WARMER: Dict[str, Any] = {'thread': None}
+
+
+def start_warmer(tasks: Callable[[], list], interval: float = 60.0) -> bool:
+    """Start (once per server) a background thread that refreshes ``tasks()`` (a list of zero-argument callables) every
+    ``interval`` seconds, so the first visitor after a quiet spell reads a warm cache instead of waiting on ESPN.
+    Also loads the disk snapshot so a restarted server is warm immediately.  Returns True if it started a thread."""
+    with _GUARD:
+        t = _WARMER['thread']
+        if t is not None and t.is_alive():
+            return False
+        load_snapshot()
+
+        def loop() -> None:
+            while True:
+                for fn in tasks():
+                    try:
+                        fn()
+                    except Exception:
+                        STATS['errors'] += 1
+                time.sleep(interval)
+        _WARMER['thread'] = threading.Thread(target=loop, name='market-warmer', daemon=True)
+        _WARMER['thread'].start()
+        return True
