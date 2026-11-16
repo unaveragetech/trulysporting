@@ -57,6 +57,13 @@ def et_dates() -> List[str]:
     return [now.strftime('%Y%m%d'), (now - timedelta(days=1)).strftime('%Y%m%d')]
 
 
+def upcoming_dates(n: int = 2) -> List[str]:
+    """The next ``n`` Eastern days after today (YYYYMMDD): games that have not started but are inside a 24-48 hour window."""
+    from datetime import timedelta
+    now = datetime.now(ZoneInfo('America/New_York'))
+    return [(now + timedelta(days=k)).strftime('%Y%m%d') for k in range(1, n + 1)]
+
+
 ESPN_SITE = 'https://site.api.espn.com/apis/site/v2/sports/{ep}/scoreboard'
 # ESPN's default scoreboard hides most college games unless a group is requested.
 COLLEGE_GROUPS: Dict[str, List[str]] = {
@@ -81,6 +88,8 @@ def board_requests(ep: str) -> List[Dict]:
         reqs.append({**base, 'dates': today})
         if not college or early:  # games that started last evening and are still going
             reqs.append({**base, 'dates': yday})
+        for d in upcoming_dates(2):  # tomorrow and the day after: a "next 24 hours" window reaches into them
+            reqs.append({**base, 'dates': d})
     return reqs
 
 
